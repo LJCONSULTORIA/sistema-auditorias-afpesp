@@ -544,6 +544,20 @@ function AuditHub() {
     ) ?? [];
   const audits =
     useLiveQuery<Audit[]>(() => db.audits.toArray(), []) ?? [];
+  const checklists =
+    useLiveQuery<Checklist[]>(
+      () =>
+        type !== "Todos" && unit !== "Todos"
+          ? db.checklists
+              .filter(
+                (checklist) =>
+                  checklist.locationType === type &&
+                  normalize(checklist.unit).replace(/^ul\s+/, "") === normalize(unit),
+              )
+              .sortBy("createdAt")
+          : Promise.resolve([]),
+      [type, unit],
+    ) ?? [];
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
     (a) =>
@@ -632,14 +646,30 @@ function AuditHub() {
             disabled={type === "Todos" || unit === "Todos"}
             onClick={() =>
               nav(
-                `/auditorias/nova?type=${encodeURIComponent(type)}&unit=${encodeURIComponent(unit)}`,
+                `/auditorias/nova?type=${encodeURIComponent(type)}&unit=${encodeURIComponent(unit)}&mode=novo`,
               )
             }
           >
             <Plus size={16} />
-            Nova auditoria
+            Importar novo checklist
           </button>
         </div>
+        {type !== "Todos" && unit !== "Todos" && (
+          <ChecklistManagement
+            checklists={[...checklists].reverse()}
+            audits={audits.filter(
+              (audit) =>
+                audit.locationType === type &&
+                normalize(audit.unit).replace(/^ul\s+/, "") === normalize(unit),
+            )}
+            onOpen={(auditId) => nav(`/auditorias/${auditId}`)}
+            onStart={(checklistId) =>
+              nav(
+                `/auditorias/nova?type=${encodeURIComponent(type)}&unit=${encodeURIComponent(unit)}&checklistId=${checklistId}`,
+              )
+            }
+          />
+        )}
         <div className="grid gap-5 lg:grid-cols-3">
           {(["Programada", "Em andamento", "Finalizada"] as const).map(
             (status) => (
@@ -654,6 +684,70 @@ function AuditHub() {
         </div>
       </>
     </>
+  );
+}
+function ChecklistManagement({
+  checklists,
+  audits,
+  onOpen,
+  onStart,
+}: {
+  checklists: Checklist[];
+  audits: Audit[];
+  onOpen: (auditId: number) => void;
+  onStart: (checklistId: number) => void;
+}) {
+  return (
+    <section className="card mb-6">
+      <h2 className="text-2xl font-bold text-afpesp-700">Checklists cadastrados</h2>
+      <p className="mb-5 mt-1 text-sm text-slate-500">Modelos disponíveis para o tipo de local e local selecionados.</p>
+      <div className="space-y-3">
+        {checklists.length ? checklists.map((checklist) => {
+          const uses = audits.filter((audit) => audit.checklistId === checklist.id);
+          const activeAudit =
+            uses.find((audit) => audit.status === "Em andamento") ??
+            uses.find((audit) => audit.status === "Programada");
+          const latestAudit = [...uses].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+          const displayedAudit = activeAudit ?? latestAudit;
+          const protectedChecklist = uses.some((audit) => audit.status === "Finalizada");
+          const status = displayedAudit?.status ?? "Disponível";
+          const statusClass =
+            status === "Finalizada" ? "text-green-700" :
+            status === "Em andamento" ? "text-amber-700" :
+            status === "Programada" ? "text-blue-700" : "text-slate-600";
+          return (
+            <article key={checklist.id} className="rounded-xl border border-slate-200 bg-slate-50/40 p-4">
+              <h3 className="text-lg font-bold text-afpesp-800">{checklist.fileName || checklist.name}</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {checklist.locationType} • {checklist.unit} • {checklist.items.length} questões • Cadastrado em {new Date(checklist.createdAt).toLocaleString("pt-BR")}
+              </p>
+              <p className="mt-3 text-sm text-slate-600">Utilizado em {uses.length} auditoria(s).</p>
+              <div className={`mt-3 font-bold uppercase ${statusClass}`}>{status}</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className="btn bg-blue-700 text-white hover:bg-blue-800"
+                  onClick={() => activeAudit?.id ? onOpen(activeAudit.id) : onStart(checklist.id!)}
+                >
+                  {activeAudit?.status === "Em andamento" ? "Continuar auditoria" : "Iniciar auditoria"}
+                </button>
+                {protectedChecklist ? (
+                  <button className="btn bg-slate-300 text-white" disabled>Protegido</button>
+                ) : (
+                  <button
+                    className="btn bg-red-600 text-white hover:bg-red-700"
+                    onClick={() => confirm("Excluir este checklist cadastrado? Esta ação não pode ser desfeita.") && db.checklists.delete(checklist.id!)}
+                  >
+                    Excluir
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        }) : (
+          <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">Nenhum checklist cadastrado para este local.</p>
+        )}
+      </div>
+    </section>
   );
 }
 function AuditColumn({
@@ -755,19 +849,25 @@ function AuditForm() {
   const locationType =
     (params.get("type") as LocationType) || "Unidade de Lazer";
   const selectedUnit = params.get("unit") || "";
+  const requestedChecklistId = Number(params.get("checklistId") || 0);
   const checklists =
     useLiveQuery(
       () =>
         db.checklists
           .filter(
-            (c) => c.unit === selectedUnit && c.locationType === locationType,
+            (c) =>
+              normalize(c.unit).replace(/^ul\s+/, "") ===
+                normalize(selectedUnit).replace(/^ul\s+/, "") &&
+              c.locationType === locationType,
           )
           .sortBy("createdAt"),
       [selectedUnit, locationType],
     ) ?? [];
   const registeredDocuments =
     useLiveQuery(() => db.documents.filter((document) => document.active).toArray(), []) ?? [];
-  const [mode, setMode] = useState<"anterior" | "novo">("anterior");
+  const [mode, setMode] = useState<"anterior" | "novo">(
+    params.get("mode") === "novo" ? "novo" : "anterior",
+  );
   const [error, setError] = useState("");
   const [audit, setAudit] = useState<Audit>({
     locationType,
@@ -809,6 +909,15 @@ function AuditForm() {
         photos: [],
       })),
     }));
+  useEffect(() => {
+    if (id || !requestedChecklistId || audit.checklistId || !checklists.length)
+      return;
+    const selected = checklists.find((item) => item.id === requestedChecklistId);
+    if (selected) {
+      fromChecklist(selected);
+      setMode("anterior");
+    }
+  }, [id, requestedChecklistId, audit.checklistId, checklists]);
   const upload = async (file?: File) => {
     if (!file) return;
     try {
