@@ -18,6 +18,16 @@ const clean = (v: string) => v || "Não informado";
 const dataUrlBytes = (url: string) =>
   Uint8Array.from(atob(url.split(",")[1]), (c) => c.charCodeAt(0));
 export async function exportDocx(a: Audit) {
+  const documentRows = Array.from(
+    new Map(
+      a.answers
+        .filter((answer) => answer.documentType || answer.documentCode || answer.documentTitle || answer.documentVersion)
+        .map((answer) => [
+          [answer.documentType, answer.documentCode, answer.documentTitle, answer.documentVersion].join("|"),
+          answer,
+        ]),
+    ).values(),
+  );
   const children: (Paragraph | Table)[] = [
     new Paragraph({
       text: "RELATÓRIO DE AUDITORIA INTERNA",
@@ -55,22 +65,75 @@ export async function exportDocx(a: Audit) {
       ),
     }),
   ];
+  if (documentRows.length) {
+    children.push(
+      new Paragraph({
+        text: "DOCUMENTOS DE REFERÊNCIA",
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 360, after: 180 },
+      }),
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          ["Tipo", "Código", "Título", "Versão"],
+          ...documentRows.map((answer) => [
+            answer.documentType || "—",
+            answer.documentCode || "—",
+            answer.documentTitle || "—",
+            answer.documentVersion || "—",
+          ]),
+        ].map((row, rowIndex) =>
+          new TableRow({
+            children: row.map((value) =>
+              new TableCell({
+                children: [
+                  new Paragraph({
+                    children: [new TextRun({ text: value, bold: rowIndex === 0 })],
+                  }),
+                ],
+              }),
+            ),
+          }),
+        ),
+      }),
+    );
+  }
   a.answers.forEach((ans, i) => {
     children.push(
       new Paragraph({
-        text: `${i + 1}. Requisito ${ans.requirement}`,
+        text: `${i + 1}. ${ans.question}`,
         heading: HeadingLevel.HEADING_2,
+        spacing: { before: 420, after: 160 },
       }),
       new Paragraph({
         children: [
-          new TextRun({ text: "Questão: ", bold: true }),
-          new TextRun(ans.question),
+          new TextRun({ text: "Requisito: ", bold: true }),
+          new TextRun(clean(ans.requirement)),
         ],
       }),
+      ...(ans.documentType || ans.documentCode || ans.documentTitle || ans.documentVersion
+        ? [
+            new Paragraph({
+              children: [
+                new TextRun({ text: "Documento de referência: ", bold: true }),
+                new TextRun(
+                  [
+                    ans.documentType,
+                    ans.documentCode,
+                    ans.documentTitle,
+                    ans.documentVersion && `Versão ${ans.documentVersion}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" — "),
+                ),
+              ],
+            }),
+          ]
+        : []),
       new Paragraph({
         children: [
           new TextRun({ text: "Classificação: ", bold: true }),
-          new TextRun(ans.classification),
+          new TextRun(ans.classification || "Não classificada"),
         ],
       }),
       new Paragraph({
@@ -130,6 +193,11 @@ export function exportExcel(audits: Audit[]) {
       Requisito: x.requirement,
       Questão: x.question,
       Classificação: x.classification,
+      Processo: x.process,
+      "Tipo do documento": x.documentType,
+      "Código do documento": x.documentCode,
+      "Título do documento": x.documentTitle,
+      Versão: x.documentVersion,
       Constatação: x.finding,
       Recomendação: x.recommendation,
     })),

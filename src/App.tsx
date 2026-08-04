@@ -47,7 +47,7 @@ import type {
   LocationType,
   Unit,
 } from "./types";
-import { exportBackup, exportDocx, exportExcel, importBackup } from "./reports";
+import { exportDocx, exportExcel } from "./reports";
 ChartJS.register(
   ArcElement,
   BarElement,
@@ -129,7 +129,7 @@ function Layout({
 }
 function Login({ onLogin }: { onLogin: (name: string) => void }) {
   const auditors =
-    useLiveQuery(() => db.auditors.where("active").equals(1).toArray(), []) ??
+    useLiveQuery(() => db.auditors.filter((auditor) => auditor.active).toArray(), []) ??
     [];
   const [selected, setSelected] = useState("");
   const [newName, setNewName] = useState("");
@@ -238,7 +238,7 @@ function Stat({
 function HomePage() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
   const units =
-    useLiveQuery(() => db.units.where("active").equals(1).toArray(), []) ?? [];
+    useLiveQuery(() => db.units.filter((item) => item.active).toArray(), []) ?? [];
   const nav = useNavigate();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
   const [unit, setUnit] = useState("Todos");
@@ -262,7 +262,8 @@ function HomePage() {
       return false;
     return true;
   });
-  const answers = filtered.flatMap((a) => a.answers);
+  const answeredAudits = filtered.filter((a) => a.status !== "Programada");
+  const answers = answeredAudits.flatMap((a) => a.answers).filter((a) => a.classification);
   const counts = classes.map(
     (c) => answers.filter((a) => a.classification === c).length,
   );
@@ -362,7 +363,11 @@ function HomePage() {
         <Stat
           title="Locais auditados"
           value={String(
-            new Set(filtered.map((a) => `${a.locationType}|${a.unit}`)).size,
+            new Set(
+              filtered
+                .filter((a) => a.status === "Finalizada")
+                .map((a) => `${a.locationType}|${a.unit}`),
+            ).size,
           )}
           icon={<Building2 />}
         />
@@ -434,7 +439,10 @@ function HomePage() {
 }
 function Dashboard() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
-  const answers = audits.flatMap((a) => a.answers);
+  const answers = audits
+    .filter((a) => a.status !== "Programada")
+    .flatMap((a) => a.answers)
+    .filter((a) => a.classification);
   const counts = classes.map(
     (c) => answers.filter((a) => a.classification === c).length,
   );
@@ -514,7 +522,7 @@ function AuditHub() {
               .equals(type)
               .and((u) => u.active)
               .toArray()
-          : db.units.where("active").equals(1).toArray(),
+          : db.units.filter((item) => item.active).toArray(),
       [type],
     ) ?? [];
   const audits =
@@ -692,24 +700,30 @@ async function readChecklist(file: File): Promise<ChecklistItem[]> {
   );
   if (!rows.length) throw new Error("A planilha não possui dados.");
   const keys = Object.keys(rows[0]);
-  const qKey = keys.find((k) =>
-    ["questao", "pergunta", "item", "criterio", "checklist"].some((x) =>
-      normalize(k).includes(x),
-    ),
-  );
-  const rKey = keys.find((k) =>
-    ["requisito", "iso", "clausula", "referencia"].some((x) =>
-      normalize(k).includes(x),
-    ),
-  );
+  const findKey = (...aliases: string[]) =>
+    keys.find((k) => aliases.some((x) => normalize(k).includes(x)));
+  const qKey = findKey("questao de auditoria", "questao", "pergunta", "item");
+  const rKey = findKey("requisito aplicavel", "requisito", "iso", "clausula");
+  const numberKey = findKey("nº", "numero", "n.");
+  const processKey = findKey("processo", "assunto");
+  const typeKey = findKey("tipo do documento", "tipo documento", "tipo");
+  const codeKey = findKey("codigo do documento", "codigo documento", "codigo");
+  const titleKey = findKey("titulo do documento", "titulo documento", "titulo");
+  const versionKey = findKey("versao", "versão");
   if (!qKey)
     throw new Error(
       "Não foi localizada uma coluna de Questão/Pergunta/Item na planilha.",
     );
   return rows
-    .map((r) => ({
+    .map((r, index) => ({
+      number: numberKey ? Number(r[numberKey]) || index + 1 : index + 1,
+      process: processKey ? String(r[processKey]).trim() : "",
       requirement: rKey ? String(r[rKey]).trim() : "",
       question: String(r[qKey]).trim(),
+      documentType: typeKey ? String(r[typeKey]).trim() : "",
+      documentCode: codeKey ? String(r[codeKey]).trim() : "",
+      documentTitle: titleKey ? String(r[titleKey]).trim() : "",
+      documentVersion: versionKey ? String(r[versionKey]).trim() : "",
     }))
     .filter((x) => x.question);
 }
@@ -758,9 +772,14 @@ function AuditForm() {
       answers: c.items.map((q, i) => ({
         id: crypto.randomUUID(),
         questionId: i,
+        process: q.process,
         requirement: q.requirement,
         question: q.question,
-        classification: "Conforme",
+        documentType: q.documentType,
+        documentCode: q.documentCode,
+        documentTitle: q.documentTitle,
+        documentVersion: q.documentVersion,
+        classification: null,
         finding: "",
         recommendation: "",
         photos: [],
@@ -948,7 +967,7 @@ function AuditForm() {
         </p>
       )}
       {(id || audit.answers.length > 0) && (
-        <div className="mt-6 space-y-4">
+        <div className="mt-6 space-y-6">
           <div className="card grid gap-4 md:grid-cols-3">
             <Field label="Auditor responsável">
               <input
@@ -986,33 +1005,39 @@ function AuditForm() {
           </div>
           {audit.answers.map((ans, i) => (
             <div className="card" key={ans.id}>
-              <div className="mb-4 flex gap-3">
+              <div className="mb-5 flex gap-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-afpesp-600 text-sm font-bold text-white">
                   {i + 1}
                 </span>
                 <div>
-                  <div className="text-xs font-bold uppercase text-afpesp-600">
-                    {ans.requirement || "Sem requisito informado"}
-                  </div>
                   <div className="font-medium">{ans.question}</div>
+                  <div className="mt-2 text-sm font-semibold text-afpesp-700">
+                    Requisito: {ans.requirement || "Não informado"}
+                  </div>
+                  {(ans.documentType || ans.documentCode || ans.documentTitle || ans.documentVersion) && (
+                    <div className="mt-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                      <span className="font-semibold">Documento de referência:</span>{" "}
+                      {[ans.documentType, ans.documentCode, ans.documentTitle, ans.documentVersion && `Versão ${ans.documentVersion}`].filter(Boolean).join(" — ")}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Classificação">
-                  <select
-                    className="field"
-                    value={ans.classification}
-                    onChange={(e) =>
-                      update(i, {
-                        classification: e.target.value as Classification,
-                      })
-                    }
-                  >
-                    {classes.map((c) => (
-                      <option key={c}>{c}</option>
+                <div className="md:col-span-2">
+                  <span className="label">Classificação</span>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {classes.map((classification) => (
+                      <button
+                        type="button"
+                        key={classification}
+                        className={`classification-button classification-${normalize(classification).replaceAll(" ", "-")} ${ans.classification === classification ? "selected" : ""}`}
+                        onClick={() => update(i, { classification })}
+                      >
+                        {classification}
+                      </button>
                     ))}
-                  </select>
-                </Field>
+                  </div>
+                </div>
                 <Field label="Evidência fotográfica">
                   <input
                     type="file"
@@ -1100,6 +1125,12 @@ function Locations() {
   const items = useLiveQuery(() => db.units.toArray(), []) ?? [];
   const [name, setName] = useState("");
   const [type, setType] = useState<LocationType>("Unidade de Lazer");
+  const [listType, setListType] = useState<LocationType | "Todos">("Todos");
+  const [search, setSearch] = useState("");
+  const filteredItems = items.filter((item) =>
+    (listType === "Todos" || item.type === listType) &&
+    (!search.trim() || normalize(item.name).includes(normalize(search))),
+  );
   const add = async () => {
     if (name.trim()) {
       await db.units.add({ name: name.trim(), type, active: true });
@@ -1112,6 +1143,14 @@ function Locations() {
         <Building2 />
         Locais
       </h2>
+      <div className="mb-4 grid gap-2 sm:grid-cols-2">
+        <select className="field" value={listType} onChange={(e) => setListType(e.target.value as LocationType | "Todos")}>
+          <option>Todos</option>
+          <option>Unidade de Lazer</option>
+          <option>Sede Social</option>
+        </select>
+        <input className="field" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filtrar local / setor" />
+      </div>
       <select
         className="field mb-2"
         value={type}
@@ -1131,7 +1170,7 @@ function Locations() {
           <Plus size={16} />
         </button>
       </div>
-      {items.map((x) => (
+      {filteredItems.map((x) => (
         <div key={x.id} className="flex justify-between border-t py-2 text-sm">
           <span>
             <b>{x.type}</b> — {x.name}
@@ -1188,52 +1227,6 @@ function CrudAuditors() {
         </div>
       ))}
     </div>
-  );
-}
-function Backup() {
-  const [msg, setMsg] = useState("");
-  return (
-    <>
-      <PageTitle
-        title="Backup e restauração"
-        subtitle="Exporte cópias dos dados armazenados neste navegador."
-      />
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="card">
-          <Download className="mb-3 text-afpesp-600" />
-          <h2 className="font-bold">Exportar backup</h2>
-          <p className="my-3 text-sm text-slate-500">
-            Inclui locais, auditores, checklists, auditorias, respostas e fotos.
-          </p>
-          <button className="btn-primary" onClick={exportBackup}>
-            Exportar
-          </button>
-        </div>
-        <div className="card">
-          <Upload className="mb-3 text-afpesp-600" />
-          <h2 className="font-bold">Restaurar backup</h2>
-          <p className="my-3 text-sm text-slate-500">
-            Substitui os dados atuais pelos dados do arquivo.
-          </p>
-          <input
-            type="file"
-            accept="application/json"
-            className="field"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (!f || !confirm("Substituir todos os dados atuais?")) return;
-              try {
-                await importBackup(f);
-                setMsg("Backup restaurado.");
-              } catch (err) {
-                setMsg((err as Error).message);
-              }
-            }}
-          />
-          {msg && <p className="mt-3 text-sm">{msg}</p>}
-        </div>
-      </div>
-    </>
   );
 }
 export default function App() {

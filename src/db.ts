@@ -40,6 +40,24 @@ class AuditDB extends Dexie {
             if (a.status === "Concluída") a.status = "Finalizada";
           });
       });
+    this.version(3)
+      .stores({
+        audits: "++id,status,locationType,unit,startDate,updatedAt",
+        units: "++id,&name,type,active",
+        auditors: "++id,&name,active",
+        questions: null,
+        checklists: "++id,name,createdAt",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("audits").toCollection().modify((audit) => {
+          if (audit.status === "Programada") {
+            audit.answers = (audit.answers ?? []).map((answer: Record<string, unknown>) => ({
+              ...answer,
+              classification: null,
+            }));
+          }
+        });
+      });
   }
 }
 export const db = new AuditDB();

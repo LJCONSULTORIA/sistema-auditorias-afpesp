@@ -21,8 +21,14 @@ export interface Question {
   active: boolean;
 }
 export interface ChecklistItem {
+  number: number;
+  process: string;
   requirement: string;
   question: string;
+  documentType: string;
+  documentCode: string;
+  documentTitle: string;
+  documentVersion: string;
 }
 export interface Checklist {
   id?: number;
@@ -36,9 +42,14 @@ export interface Checklist {
 export interface Answer {
   id: string;
   questionId: number;
+  process: string;
   requirement: string;
   question: string;
-  classification: Classification;
+  documentType: string;
+  documentCode: string;
+  documentTitle: string;
+  documentVersion: string;
+  classification: Classification | null;
   finding: string;
   recommendation: string;
   photos: string[];
