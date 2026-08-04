@@ -1188,39 +1188,27 @@ function DocumentPicker({
   onAdd: (document: DocumentReference) => void;
 }) {
   const [type, setType] = useState("");
-  const [code, setCode] = useState("");
-  const [title, setTitle] = useState("");
-  const [version, setVersion] = useState("");
-  const unique = (values: string[]) => [...new Set(values)].filter(Boolean).sort();
-  const codes = unique(documents.filter((document) => document.type === type).map((document) => document.code));
-  const titles = unique(documents.filter((document) => document.type === type && document.code === code).map((document) => document.title));
-  const versions = unique(documents.filter((document) => document.type === type && document.code === code && document.title === title).map((document) => document.version));
-  const selected = documents.find((document) =>
-    document.type === type &&
-    document.code === code &&
-    document.title === title &&
-    document.version === version,
-  );
+  const [documentId, setDocumentId] = useState("");
+  const available = documents
+    .filter((document) => document.type === type)
+    .sort((a, b) => `${a.code} ${a.title} ${a.version}`.localeCompare(`${b.code} ${b.title} ${b.version}`, "pt-BR"));
+  const selected = documents.find((document) => document.id === Number(documentId));
   return (
     <div className="mt-3 rounded-lg border border-dashed border-slate-300 p-3">
       <div className="mb-2 text-sm font-semibold text-slate-700">Adicionar documento aplicável</div>
       {documents.length ? (
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.5fr_.8fr_auto]">
-          <select className="field" value={type} onChange={(e) => { setType(e.target.value); setCode(""); setTitle(""); setVersion(""); }}>
+        <div className="grid gap-2 md:grid-cols-[1fr_2.5fr_auto]">
+          <select className="field" value={type} onChange={(e) => { setType(e.target.value); setDocumentId(""); }}>
             <option value="">Tipo de documento</option>
             {documentTypes.filter((item) => documents.some((document) => document.type === item)).map((item) => <option key={item}>{item}</option>)}
           </select>
-          <select className="field" value={code} disabled={!type} onChange={(e) => { setCode(e.target.value); setTitle(""); setVersion(""); }}>
-            <option value="">Código</option>
-            {codes.map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <select className="field" value={title} disabled={!code} onChange={(e) => { setTitle(e.target.value); setVersion(""); }}>
-            <option value="">Nome do documento</option>
-            {titles.map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <select className="field" value={version} disabled={!title} onChange={(e) => setVersion(e.target.value)}>
-            <option value="">Versão</option>
-            {versions.map((item) => <option key={item}>{item}</option>)}
+          <select className="field" value={documentId} disabled={!type} onChange={(e) => setDocumentId(e.target.value)}>
+            <option value="">Selecione o documento cadastrado</option>
+            {available.map((document) => (
+              <option key={document.id} value={document.id}>
+                {document.code} — {document.title} — versão {document.version}
+              </option>
+            ))}
           </select>
           <button
             type="button"
@@ -1229,7 +1217,7 @@ function DocumentPicker({
             onClick={() => {
               if (!selected) return;
               onAdd({ type: selected.type, code: selected.code, title: selected.title, version: selected.version });
-              setType(""); setCode(""); setTitle(""); setVersion("");
+              setDocumentId("");
             }}
           >
             <Plus size={16} /> Adicionar
@@ -1311,19 +1299,19 @@ function Locations() {
           <Plus size={16} />
         </button>
       </div>
-      {filteredItems.map((x) => (
-        <div key={x.id} className="flex justify-between border-t py-2 text-sm">
-          <span>
-            <b>{x.type}</b> — {x.name}
-          </span>
-          <button
-            className="text-red-600"
-            onClick={() => db.units.delete(x.id!)}
-          >
-            <Trash2 size={16} />
-          </button>
+      <details className="mt-4 rounded-lg border border-slate-200">
+        <summary className="cursor-pointer select-none p-3 text-sm font-semibold text-afpesp-700">
+          Consultar locais cadastrados ({filteredItems.length})
+        </summary>
+        <div className="max-h-80 overflow-y-auto px-3 pb-3">
+          {filteredItems.map((x) => (
+            <div key={x.id} className="flex justify-between border-t py-2 text-sm">
+              <span><b>{x.type}</b> — {x.name}</span>
+              <button className="text-red-600" onClick={() => db.units.delete(x.id!)}><Trash2 size={16} /></button>
+            </div>
+          ))}
         </div>
-      ))}
+      </details>
     </div>
   );
 }
@@ -1356,17 +1344,19 @@ function CrudAuditors() {
           <Plus size={16} />
         </button>
       </div>
-      {items.map((x: Auditor) => (
-        <div key={x.id} className="flex justify-between border-t py-2 text-sm">
-          <span>{x.name}</span>
-          <button
-            className="text-red-600"
-            onClick={() => db.auditors.delete(x.id!)}
-          >
-            <Trash2 size={16} />
-          </button>
+      <details className="mt-4 rounded-lg border border-slate-200">
+        <summary className="cursor-pointer select-none p-3 text-sm font-semibold text-afpesp-700">
+          Consultar auditores cadastrados ({items.length})
+        </summary>
+        <div className="max-h-80 overflow-y-auto px-3 pb-3">
+          {items.map((x: Auditor) => (
+            <div key={x.id} className="flex justify-between border-t py-2 text-sm">
+              <span>{x.name}</span>
+              <button className="text-red-600" onClick={() => db.auditors.delete(x.id!)}><Trash2 size={16} /></button>
+            </div>
+          ))}
         </div>
-      ))}
+      </details>
     </div>
   );
 }
@@ -1435,9 +1425,13 @@ function DocumentsRegistry() {
         <button className="btn-primary self-end" onClick={add}><Plus size={16} /> Cadastrar</button>
       </div>
       {message && <p className="mt-3 text-sm text-red-700">{message}</p>}
-      <div className="mt-5 overflow-x-auto">
-        {filtered.length ? (
-          <table className="w-full min-w-[720px] text-left text-sm">
+      <details className="mt-5 rounded-lg border border-slate-200">
+        <summary className="cursor-pointer select-none p-3 text-sm font-semibold text-afpesp-700">
+          Consultar documentos cadastrados — {type} ({filtered.length})
+        </summary>
+        <div className="max-h-96 overflow-auto px-3 pb-3">
+          {filtered.length ? (
+            <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr><th className="p-3">Tipo</th><th className="p-3">Código</th><th className="p-3">Nome do documento</th><th className="p-3">Versão</th><th className="w-16 p-3"></th></tr>
             </thead>
@@ -1449,9 +1443,10 @@ function DocumentsRegistry() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        ) : <p className="text-sm text-slate-500">Nenhum documento cadastrado neste tipo.</p>}
-      </div>
+            </table>
+          ) : <p className="py-3 text-sm text-slate-500">Nenhum documento cadastrado neste tipo.</p>}
+        </div>
+      </details>
     </div>
   );
 }
