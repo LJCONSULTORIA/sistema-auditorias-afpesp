@@ -21,7 +21,6 @@ import {
   Save,
   Settings,
   Trash2,
-  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -230,23 +229,27 @@ function Stat({
   title,
   value,
   icon,
+  detail,
 }: {
   title: string;
   value: string;
   icon: React.ReactNode;
+  detail?: string;
 }) {
   return (
-    <div className="card flex items-center gap-4">
+    <div className="card flex min-h-28 items-center gap-4 p-4 sm:p-5">
       <div className="rounded-lg bg-afpesp-50 p-3 text-afpesp-600">{icon}</div>
-      <div>
+      <div className="min-w-0">
         <div className="text-2xl font-bold">{value}</div>
-        <div className="text-sm text-slate-500">{title}</div>
+        <div className="text-sm font-medium text-slate-600">{title}</div>
+        {detail && <div className="mt-1 text-xs text-slate-400">{detail}</div>}
       </div>
     </div>
   );
 }
 function HomePage() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
+  const checklists = useLiveQuery(() => db.checklists.toArray(), []) ?? [];
   const units =
     useLiveQuery(() => db.units.filter((item) => item.active).toArray(), []) ?? [];
   const nav = useNavigate();
@@ -257,7 +260,10 @@ function HomePage() {
   const now = new Date();
   const filtered = audits.filter((a) => {
     if (type !== "Todos" && a.locationType !== type) return false;
-    if (unit !== "Todos" && a.unit !== unit) return false;
+    if (
+      unit !== "Todos" &&
+      normalize(a.unit).replace(/^ul\s+/, "") !== normalize(unit).replace(/^ul\s+/, "")
+    ) return false;
     if (
       period === "Este ano" &&
       !a.startDate.startsWith(String(now.getFullYear()))
@@ -287,13 +293,28 @@ function HomePage() {
     .filter(Boolean)
     .sort();
   const visibleUnits = units.filter((u) => type === "Todos" || u.type === type);
+  const visibleChecklists = checklists.filter((checklist) =>
+    (type === "Todos" || checklist.locationType === type) &&
+    (unit === "Todos" ||
+      normalize(checklist.unit).replace(/^ul\s+/, "") ===
+        normalize(unit).replace(/^ul\s+/, "")),
+  );
+  const statusCounts = [
+    filtered.filter((audit) => audit.status === "Programada").length,
+    filtered.filter((audit) => audit.status === "Em andamento").length,
+    filtered.filter((audit) => audit.status === "Finalizada").length,
+  ];
+  const locationCounts = [
+    filtered.filter((audit) => audit.locationType === "Sede Social").length,
+    filtered.filter((audit) => audit.locationType === "Unidade de Lazer").length,
+  ];
   return (
     <>
       <PageTitle
         title="Sistema de Auditorias"
         subtitle="Dashboard de Auditorias AFPESP"
       />
-      <div className="card mb-5 grid gap-4 md:grid-cols-[1fr_1fr_1fr_auto]">
+      <div className="card mb-5 grid gap-4 p-4 sm:p-5 md:grid-cols-3">
         <Field label="Tipo de local">
           <select
             className="field"
@@ -328,35 +349,51 @@ function HomePage() {
             <option>Este ano</option>
           </select>
         </Field>
-        <button className="btn-primary self-end">Atualizar</button>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+      <h2 className="mb-3 text-lg font-bold text-slate-800">Visão geral</h2>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Stat
-          title="Auditorias"
+          title="Total de auditorias"
           value={String(filtered.length)}
           icon={<ClipboardCheck />}
+          detail="Registros no filtro atual"
+        />
+        <Stat
+          title="Checklists cadastrados"
+          value={String(visibleChecklists.length)}
+          icon={<ClipboardCheck />}
+          detail="Modelos disponíveis"
         />
         <Stat
           title="Finalizadas"
-          value={String(
-            filtered.filter((a) => a.status === "Finalizada").length,
-          )}
+          value={String(statusCounts[2])}
           icon={<ArchiveRestore />}
         />
         <Stat
           title="Programadas"
-          value={String(
-            filtered.filter((a) => a.status === "Programada").length,
-          )}
+          value={String(statusCounts[0])}
           icon={<ClipboardCheck />}
         />
         <Stat
           title="Em andamento"
-          value={String(
-            filtered.filter((a) => a.status === "Em andamento").length,
-          )}
+          value={String(statusCounts[1])}
           icon={<Settings />}
         />
+        <Stat
+          title="Locais auditados"
+          value={String(
+            new Set(
+              filtered
+                .filter((a) => a.status === "Finalizada")
+                .map((a) => `${a.locationType}|${a.unit}`),
+            ).size,
+          )}
+          icon={<Building2 />}
+          detail="Somente finalizadas"
+        />
+      </div>
+      <h2 className="mb-3 mt-6 text-lg font-bold text-slate-800">Resultados registrados</h2>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
           title="Conformidades"
           value={String(counts[0])}
@@ -377,37 +414,22 @@ function HomePage() {
           value={String(counts[3])}
           icon={<ClipboardCheck />}
         />
-        <Stat
-          title="Locais auditados"
-          value={String(
-            new Set(
-              filtered
-                .filter((a) => a.status === "Finalizada")
-                .map((a) => `${a.locationType}|${a.unit}`),
-            ).size,
-          )}
-          icon={<Building2 />}
-        />
       </div>
-      <div className="my-5 flex flex-wrap gap-3">
-        <button className="btn-primary" onClick={() => nav("/auditorias")}>
-          <Plus size={16} />
-          Nova auditoria
-        </button>
-        <button className="btn-primary" onClick={() => nav("/auditorias")}>
-          <Upload size={16} />
-          Importar novo checklist
+      <div className="my-5">
+        <button className="btn-primary w-full sm:w-auto" onClick={() => nav("/auditorias")}>
+          <ClipboardCheck size={16} />
+          Gerenciar auditorias e checklists
         </button>
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="card">
+        <div className="card p-4 sm:p-5">
           <h2 className="text-xl font-bold text-afpesp-700">
             Resultado das auditorias
           </h2>
           <p className="mb-4 text-sm text-slate-500">
             Distribuição dos resultados no período/filtro selecionado.
           </p>
-          <Doughnut
+          <div className="h-72"><Doughnut
             data={{
               labels: classes,
               datasets: [
@@ -417,17 +439,47 @@ function HomePage() {
                 },
               ],
             }}
-            options={{ plugins: { legend: { position: "bottom" } } }}
-          />
+            options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } }}
+          /></div>
         </div>
-        <div className="card">
+        <div className="card p-4 sm:p-5">
+          <h2 className="text-xl font-bold text-afpesp-700">
+            Auditorias por tipo de local
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Quantidade de auditorias da Sede Social e das Unidades de Lazer.
+          </p>
+          <div className="h-72"><Doughnut
+            data={{
+              labels: ["Sede Social", "Unidade de Lazer"],
+              datasets: [{ data: locationCounts, backgroundColor: ["#0f766e", "#38bdf8"] }],
+            }}
+            options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } }}
+          /></div>
+        </div>
+        <div className="card p-4 sm:p-5">
+          <h2 className="text-xl font-bold text-afpesp-700">
+            Auditorias por situação
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Programadas, em andamento e finalizadas no filtro selecionado.
+          </p>
+          <div className="h-72"><Bar
+            data={{
+              labels: ["Programadas", "Em andamento", "Finalizadas"],
+              datasets: [{ label: "Auditorias", data: statusCounts, backgroundColor: ["#2563eb", "#eab308", "#16a34a"] }],
+            }}
+            options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
+          /></div>
+        </div>
+        <div className="card p-4 sm:p-5">
           <h2 className="text-xl font-bold text-afpesp-700">
             Não conformidades por requisito
           </h2>
           <p className="mb-4 text-sm text-slate-500">
             Quantidade de NC por requisito aplicável.
           </p>
-          <Bar
+          <div className="h-72"><Bar
             data={{
               labels: reqs,
               datasets: [
@@ -446,9 +498,10 @@ function HomePage() {
               ],
             }}
             options={{
+              maintainAspectRatio: false,
               scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
             }}
-          />
+          /></div>
         </div>
       </div>
     </>
@@ -703,7 +756,13 @@ function ChecklistManagement({
       </div>
       <div className="mt-5 space-y-3">
         {checklists.length ? checklists.map((checklist) => {
-          const uses = audits.filter((audit) => audit.checklistId === checklist.id);
+          const uses = audits.filter((audit) =>
+            audit.checklistId === checklist.id ||
+            (!audit.checklistId &&
+              audit.locationType === checklist.locationType &&
+              normalize(audit.unit).replace(/^ul\s+/, "") === normalize(checklist.unit).replace(/^ul\s+/, "") &&
+              normalize(audit.checklistName) === normalize(checklist.name)),
+          );
           const activeAudit =
             uses.find((audit) => audit.status === "Em andamento") ??
             uses.find((audit) => audit.status === "Programada");
@@ -716,7 +775,19 @@ function ChecklistManagement({
             status === "Em andamento" ? "text-amber-700" :
             status === "Programada" ? "text-blue-700" : "text-slate-600";
           return (
-            <article key={checklist.id} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40">
+            <article
+              key={checklist.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => displayedAudit?.id ? onOpen(displayedAudit.id) : onStart(checklist)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  displayedAudit?.id ? onOpen(displayedAudit.id) : onStart(checklist);
+                }
+              }}
+              className="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40 transition hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300"
+            >
               <div className="p-4">
                 <h3 className="break-words text-base font-bold leading-snug text-afpesp-800 sm:text-lg">
                   {checklist.fileName || checklist.name}
@@ -735,16 +806,27 @@ function ChecklistManagement({
               <div className="grid gap-2 border-t border-slate-200 bg-white p-3 sm:flex sm:flex-wrap">
                 <button
                   className="btn w-full bg-blue-700 text-white hover:bg-blue-800 sm:w-auto"
-                  onClick={() => activeAudit?.id ? onOpen(activeAudit.id) : onStart(checklist)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    displayedAudit?.id ? onOpen(displayedAudit.id) : onStart(checklist);
+                  }}
                 >
-                  {activeAudit?.status === "Em andamento" ? "Continuar auditoria" : "Iniciar auditoria"}
+                  {displayedAudit?.status === "Finalizada"
+                    ? "Abrir auditoria"
+                    : displayedAudit?.status === "Em andamento"
+                      ? "Continuar auditoria"
+                      : "Iniciar auditoria"}
                 </button>
                 {protectedChecklist ? (
                   <button className="btn w-full bg-slate-300 text-white sm:w-auto" disabled>Protegido</button>
                 ) : (
                   <button
                     className="btn w-full bg-red-600 text-white hover:bg-red-700 sm:w-auto"
-                    onClick={() => confirm("Excluir este checklist cadastrado? Esta ação não pode ser desfeita.") && db.checklists.delete(checklist.id!)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (confirm("Excluir este checklist cadastrado? Esta ação não pode ser desfeita."))
+                        db.checklists.delete(checklist.id!);
+                    }}
                   >
                     Excluir
                   </button>
