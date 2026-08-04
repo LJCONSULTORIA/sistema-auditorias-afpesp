@@ -33,6 +33,7 @@ import {
   LinearScale,
   Tooltip,
 } from "chart.js";
+import type { Plugin } from "chart.js";
 import { Bar, Doughnut } from "react-chartjs-2";
 import * as XLSX from "xlsx";
 import { db, seed } from "./db";
@@ -48,7 +49,30 @@ import type {
   RegisteredDocument,
   Unit,
 } from "./types";
-import { exportDocx, exportExcel } from "./reports";
+import { exportDocx } from "./reports";
+const valueLabelsPlugin: Plugin = {
+  id: "valueLabels",
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = "700 13px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      meta.data.forEach((element, index) => {
+        const value = Number(dataset.data[index] ?? 0);
+        if (!value) return;
+        const position = element.tooltipPosition(true);
+        if (position.x == null || position.y == null) return;
+        const isBar = meta.type === "bar";
+        ctx.fillStyle = isBar ? "#0b2447" : "#ffffff";
+        ctx.fillText(String(value), position.x, isBar ? position.y - 10 : position.y);
+      });
+    });
+    ctx.restore();
+  },
+};
 ChartJS.register(
   ArcElement,
   BarElement,
@@ -56,6 +80,7 @@ ChartJS.register(
   LinearScale,
   Tooltip,
   Legend,
+  valueLabelsPlugin,
 );
 const classes: Classification[] = [
   "Conforme",
@@ -230,21 +255,34 @@ function Stat({
   value,
   icon,
   detail,
+  onClick,
 }: {
   title: string;
   value: string;
   icon: React.ReactNode;
   detail?: string;
+  onClick?: () => void;
 }) {
-  return (
-    <div className="card flex min-h-28 items-center gap-4 p-4 sm:p-5">
-      <div className="rounded-lg bg-afpesp-50 p-3 text-afpesp-600">{icon}</div>
-      <div className="min-w-0">
+  const content = (
+    <>
+      <div className="rounded-xl bg-afpesp-50 p-3 text-afpesp-600">{icon}</div>
+      <div className="min-w-0 text-center">
         <div className="text-2xl font-bold">{value}</div>
-        <div className="text-sm font-medium text-slate-600">{title}</div>
+        <div className="break-words text-sm font-semibold leading-snug text-slate-600">{title}</div>
         {detail && <div className="mt-1 text-xs text-slate-400">{detail}</div>}
       </div>
-    </div>
+    </>
+  );
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      className="card flex min-h-36 w-full flex-col items-center justify-center gap-3 p-4 text-center transition hover:-translate-y-0.5 hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300"
+    >
+      {content}
+    </button>
+  ) : (
+    <div className="card flex min-h-36 flex-col items-center justify-center gap-3 p-4 text-center">{content}</div>
   );
 }
 function HomePage() {
@@ -357,27 +395,32 @@ function HomePage() {
           value={String(filtered.length)}
           icon={<ClipboardCheck />}
           detail="Registros no filtro atual"
+          onClick={() => nav("/auditorias")}
         />
         <Stat
           title="Checklists cadastrados"
           value={String(visibleChecklists.length)}
           icon={<ClipboardCheck />}
           detail="Modelos disponíveis"
+          onClick={() => nav("/auditorias")}
         />
         <Stat
           title="Finalizadas"
           value={String(statusCounts[2])}
           icon={<ArchiveRestore />}
+          onClick={() => nav("/auditorias?status=Finalizada")}
         />
         <Stat
           title="Programadas"
           value={String(statusCounts[0])}
           icon={<ClipboardCheck />}
+          onClick={() => nav("/auditorias?status=Programada")}
         />
         <Stat
           title="Em andamento"
           value={String(statusCounts[1])}
           icon={<Settings />}
+          onClick={() => nav("/auditorias?status=Em%20andamento")}
         />
         <Stat
           title="Locais auditados"
@@ -390,6 +433,7 @@ function HomePage() {
           )}
           icon={<Building2 />}
           detail="Somente finalizadas"
+          onClick={() => nav("/auditorias?status=Finalizada")}
         />
       </div>
       <h2 className="mb-3 mt-6 text-lg font-bold text-slate-800">Resultados registrados</h2>
@@ -398,21 +442,25 @@ function HomePage() {
           title="Conformidades"
           value={String(counts[0])}
           icon={<ClipboardCheck />}
+          onClick={() => nav("/auditorias")}
         />
         <Stat
           title="Não conformidades"
           value={String(counts[1])}
           icon={<ClipboardCheck />}
+          onClick={() => nav("/auditorias")}
         />
         <Stat
           title="Oportunidades"
           value={String(counts[2])}
           icon={<ClipboardCheck />}
+          onClick={() => nav("/auditorias")}
         />
         <Stat
           title="Riscos"
           value={String(counts[3])}
           icon={<ClipboardCheck />}
+          onClick={() => nav("/auditorias")}
         />
       </div>
       <div className="my-5">
@@ -435,11 +483,13 @@ function HomePage() {
               datasets: [
                 {
                   data: counts,
-                  backgroundColor: ["#2e7d32", "#d32f2f", "#ed6c02", "#8e24aa"],
+                  backgroundColor: ["#2563eb", "#e11d48", "#38bdf8", "#f59e0b"],
+                  borderWidth: 0,
+                  hoverOffset: 8,
                 },
               ],
             }}
-            options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } }}
+            options={{ maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom", labels: { usePointStyle: true, padding: 18 } } } }}
           /></div>
         </div>
         <div className="card p-4 sm:p-5">
@@ -452,9 +502,9 @@ function HomePage() {
           <div className="h-72"><Doughnut
             data={{
               labels: ["Sede Social", "Unidade de Lazer"],
-              datasets: [{ data: locationCounts, backgroundColor: ["#0f766e", "#38bdf8"] }],
+              datasets: [{ data: locationCounts, backgroundColor: ["#0b2447", "#38bdf8"], borderWidth: 0, hoverOffset: 8 }],
             }}
-            options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } }}
+            options={{ maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom", labels: { usePointStyle: true, padding: 18 } } } }}
           /></div>
         </div>
         <div className="card p-4 sm:p-5">
@@ -467,9 +517,9 @@ function HomePage() {
           <div className="h-72"><Bar
             data={{
               labels: ["Programadas", "Em andamento", "Finalizadas"],
-              datasets: [{ label: "Auditorias", data: statusCounts, backgroundColor: ["#2563eb", "#eab308", "#16a34a"] }],
+              datasets: [{ label: "Auditorias", data: statusCounts, backgroundColor: ["#3b82f6", "#f59e0b", "#0b2447"], borderRadius: 10, borderSkipped: false, maxBarThickness: 70 }],
             }}
-            options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
+            options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#e2e8f0" } } } }}
           /></div>
         </div>
         <div className="card p-4 sm:p-5">
@@ -493,13 +543,16 @@ function HomePage() {
                           a.classification === "Não Conforme",
                       ).length,
                   ),
-                  backgroundColor: "#0867a7",
+                  backgroundColor: "#245a9b",
+                  borderRadius: 10,
+                  borderSkipped: false,
+                  maxBarThickness: 64,
                 },
               ],
             }}
             options={{
               maintainAspectRatio: false,
-              scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+              scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#e2e8f0" } } },
             }}
           /></div>
         </div>
@@ -576,13 +629,40 @@ function Dashboard() {
     </>
   );
 }
+function downloadChecklistExcel(checklists: Checklist[]) {
+  const rows = checklists.flatMap((checklist) =>
+    checklist.items.map((item, index) => ({
+      Checklist: checklist.fileName || checklist.name,
+      "Tipo de local": checklist.locationType,
+      "Local / Setor": checklist.unit,
+      "Nº": item.number || index + 1,
+      Processo: item.process,
+      "Questão de auditoria": item.question,
+      "Requisito aplicável": item.requirement,
+    })),
+  );
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet["!cols"] = [
+    { wch: 38 }, { wch: 22 }, { wch: 24 }, { wch: 6 },
+    { wch: 30 }, { wch: 80 }, { wch: 22 },
+  ];
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Checklists");
+  XLSX.writeFile(workbook, "checklists_auditoria_afpesp.xlsx");
+}
 function AuditHub() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
   const [unit, setUnit] = useState("Todos");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [status, setStatus] = useState<Audit["status"] | "Todos">("Todos");
+  const initialStatus = params.get("status");
+  const [status, setStatus] = useState<Audit["status"] | "Todos">(
+    initialStatus === "Programada" || initialStatus === "Em andamento" || initialStatus === "Finalizada"
+      ? initialStatus
+      : "Todos",
+  );
   const units =
     useLiveQuery<Unit[]>(
       () =>
@@ -618,15 +698,15 @@ function AuditHub() {
     <>
       <PageTitle
         title="Auditorias"
-        subtitle="Selecione o tipo de local e, em seguida, o local que deseja consultar."
+        subtitle="Consulte, abra e gerencie as auditorias pelos filtros abaixo."
         action={
-          audits.length ? (
+          filteredChecklists.length ? (
             <button
               className="btn-secondary"
-              onClick={() => exportExcel(audits)}
+              onClick={() => downloadChecklistExcel(filteredChecklists)}
             >
               <FileDown size={16} />
-              Excel
+              Baixar checklist Excel
             </button>
           ) : undefined
         }
@@ -701,190 +781,101 @@ function AuditHub() {
             Importar novo checklist
           </button>
         </div>
-        <ChecklistManagement
-          checklists={[...filteredChecklists].reverse()}
-          audits={audits}
-          filtered={type !== "Todos" || unit !== "Todos"}
-          onOpen={(auditId) => nav(`/auditorias/${auditId}`)}
-          onStart={(checklist) =>
-            nav(
-              `/auditorias/nova?type=${encodeURIComponent(checklist.locationType)}&unit=${encodeURIComponent(checklist.unit)}&checklistId=${checklist.id}`,
-            )
-          }
+        <AuditManagement
+          audits={[...filtered].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))}
+          status={status}
+          onOpen={(id) => nav(`/auditorias/${id}`)}
         />
-        <div className="grid gap-5 lg:grid-cols-3">
-          {(["Programada", "Em andamento", "Finalizada"] as const).map(
-            (status) => (
-              <AuditColumn
-                key={status}
-                status={status}
-                audits={filtered.filter((a) => a.status === status)}
-                onOpen={(id) => nav(`/auditorias/${id}`)}
-              />
-            ),
-          )}
-        </div>
       </>
     </>
   );
 }
-function ChecklistManagement({
-  checklists,
+function AuditManagement({
   audits,
-  filtered,
-  onOpen,
-  onStart,
-}: {
-  checklists: Checklist[];
-  audits: Audit[];
-  filtered: boolean;
-  onOpen: (auditId: number) => void;
-  onStart: (checklist: Checklist) => void;
-}) {
-  return (
-    <section className="card mb-6 p-4 sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-xl font-bold text-afpesp-700 sm:text-2xl">Checklists cadastrados</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            {filtered ? "Modelos correspondentes aos filtros selecionados." : "Todos os modelos cadastrados neste navegador."}
-          </p>
-        </div>
-        <span className="rounded-full bg-afpesp-50 px-3 py-1 text-sm font-bold text-afpesp-700">
-          {checklists.length}
-        </span>
-      </div>
-      <div className="mt-5 space-y-3">
-        {checklists.length ? checklists.map((checklist) => {
-          const uses = audits.filter((audit) =>
-            audit.checklistId === checklist.id ||
-            (!audit.checklistId &&
-              audit.locationType === checklist.locationType &&
-              normalize(audit.unit).replace(/^ul\s+/, "") === normalize(checklist.unit).replace(/^ul\s+/, "") &&
-              normalize(audit.checklistName) === normalize(checklist.name)),
-          );
-          const activeAudit =
-            uses.find((audit) => audit.status === "Em andamento") ??
-            uses.find((audit) => audit.status === "Programada");
-          const latestAudit = [...uses].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-          const displayedAudit = activeAudit ?? latestAudit;
-          const protectedChecklist = uses.some((audit) => audit.status === "Finalizada");
-          const status = displayedAudit?.status ?? "Disponível";
-          const statusClass =
-            status === "Finalizada" ? "text-green-700" :
-            status === "Em andamento" ? "text-amber-700" :
-            status === "Programada" ? "text-blue-700" : "text-slate-600";
-          return (
-            <article
-              key={checklist.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => displayedAudit?.id ? onOpen(displayedAudit.id) : onStart(checklist)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  displayedAudit?.id ? onOpen(displayedAudit.id) : onStart(checklist);
-                }
-              }}
-              className="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40 transition hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300"
-            >
-              <div className="p-4">
-                <h3 className="break-words text-base font-bold leading-snug text-afpesp-800 sm:text-lg">
-                  {checklist.fileName || checklist.name}
-                </h3>
-                <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Tipo</dt><dd className="mt-0.5 text-slate-700">{checklist.locationType}</dd></div>
-                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Local / Setor</dt><dd className="mt-0.5 text-slate-700">{checklist.unit}</dd></div>
-                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Questões</dt><dd className="mt-0.5 text-slate-700">{checklist.items.length}</dd></div>
-                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Cadastro</dt><dd className="mt-0.5 text-slate-700">{new Date(checklist.createdAt).toLocaleString("pt-BR")}</dd></div>
-                </dl>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
-                  <span className="text-sm text-slate-600">Utilizado em {uses.length} auditoria(s)</span>
-                  <span className={`text-sm font-bold uppercase ${statusClass}`}>{status}</span>
-                </div>
-              </div>
-              <div className="grid gap-2 border-t border-slate-200 bg-white p-3 sm:flex sm:flex-wrap">
-                <button
-                  className="btn w-full bg-blue-700 text-white hover:bg-blue-800 sm:w-auto"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    displayedAudit?.id ? onOpen(displayedAudit.id) : onStart(checklist);
-                  }}
-                >
-                  {displayedAudit?.status === "Finalizada"
-                    ? "Abrir auditoria"
-                    : displayedAudit?.status === "Em andamento"
-                      ? "Continuar auditoria"
-                      : "Iniciar auditoria"}
-                </button>
-                {protectedChecklist ? (
-                  <button className="btn w-full bg-slate-300 text-white sm:w-auto" disabled>Protegido</button>
-                ) : (
-                  <button
-                    className="btn w-full bg-red-600 text-white hover:bg-red-700 sm:w-auto"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (confirm("Excluir este checklist cadastrado? Esta ação não pode ser desfeita."))
-                        db.checklists.delete(checklist.id!);
-                    }}
-                  >
-                    Excluir
-                  </button>
-                )}
-              </div>
-            </article>
-          );
-        }) : (
-          <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-            {filtered ? "Nenhum checklist corresponde aos filtros selecionados." : "Nenhum checklist cadastrado neste navegador."}
-          </p>
-        )}
-      </div>
-    </section>
-  );
-}
-function AuditColumn({
   status,
-  audits,
   onOpen,
 }: {
-  status: Audit["status"];
   audits: Audit[];
+  status: Audit["status"] | "Todos";
   onOpen: (id: number) => void;
 }) {
+  const title = status === "Todos"
+    ? "Todas as auditorias"
+    : status === "Em andamento"
+      ? "Auditorias em andamento"
+      : status === "Finalizada"
+        ? "Auditorias finalizadas"
+        : "Auditorias programadas";
   return (
-    <div className="card p-4 sm:p-5">
-      <div className="mb-3 flex items-center justify-between gap-2">
-      <h2 className="font-bold">
-        {
-          {
-            Programada: "Programadas",
-            "Em andamento": "Em andamento",
-            Finalizada: "Finalizadas",
-          }[status]
-        }
-      </h2>
-      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{audits.length}</span>
+    <section className="card p-4 sm:p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-afpesp-800">{title}</h2>
+          <p className="text-sm text-slate-500">Clique no card ou utilize o botão para abrir.</p>
+        </div>
+        <span className="rounded-full bg-afpesp-50 px-3 py-1 text-sm font-bold text-afpesp-700">{audits.length}</span>
       </div>
       {audits.length ? (
-        audits.map((a) => (
-          <button
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {audits.map((a) => (
+          <article
             key={a.id}
+            role="button"
+            tabIndex={0}
             onClick={() => onOpen(a.id!)}
-            className="mb-2 w-full rounded-lg border p-3 text-left hover:bg-slate-50"
+            onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && onOpen(a.id!)}
+            className="min-w-0 cursor-pointer rounded-xl border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300"
           >
-            <div className="font-semibold text-afpesp-700">
-              {formatDate(a.startDate)}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="break-words font-bold text-afpesp-800">{a.locationType} — {a.unit}</div>
+                <div className="mt-1 break-words text-sm text-slate-500">{a.checklistName || "Checklist não identificado"}</div>
+              </div>
+              <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-afpesp-50 text-afpesp-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
+                {a.status}
+              </span>
             </div>
-            <div className="text-sm text-slate-500">
-              Auditor: {a.auditors.join(", ") || "Não identificado"}
+            <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">
+              <div><dt className="text-xs font-semibold uppercase text-slate-400">Data</dt><dd className="mt-1 font-semibold text-slate-700">{formatDate(a.startDate)}</dd></div>
+              <div><dt className="text-xs font-semibold uppercase text-slate-400">Auditor</dt><dd className="mt-1 break-words text-slate-700">{a.auditors.join(", ") || "Não identificado"}</dd></div>
+            </dl>
+            <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
+              <button
+                type="button"
+                className="btn-primary w-full sm:w-auto"
+                onClick={(event) => { event.stopPropagation(); onOpen(a.id!); }}
+              >
+                {a.status === "Finalizada" ? "Abrir auditoria" : a.status === "Em andamento" ? "Continuar auditoria" : "Iniciar auditoria"}
+              </button>
+              {a.status === "Finalizada" && (
+                <button
+                  type="button"
+                  className="btn-secondary w-full sm:w-auto"
+                  onClick={(event) => { event.stopPropagation(); exportDocx(a); }}
+                >
+                  <Download size={16} /> Baixar relatório Word
+                </button>
+              )}
+              {a.status === "Programada" && (
+                <button
+                  type="button"
+                  className="btn w-full bg-red-50 text-red-700 hover:bg-red-100 sm:w-auto"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (confirm("Excluir esta auditoria programada?")) db.audits.delete(a.id!);
+                  }}
+                >
+                  <Trash2 size={16} /> Excluir
+                </button>
+              )}
             </div>
-          </button>
-        ))
+          </article>
+        ))}
+        </div>
       ) : (
-        <p className="text-sm text-slate-500">Nenhuma auditoria.</p>
+        <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">Nenhuma auditoria corresponde aos filtros selecionados.</p>
       )}
-    </div>
+    </section>
   );
 }
 function normalize(s: string) {
