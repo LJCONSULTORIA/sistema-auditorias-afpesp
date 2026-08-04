@@ -44,11 +44,84 @@ class AuditDB extends Dexie {
 }
 export const db = new AuditDB();
 export async function seed() {
-  if ((await db.units.count()) === 0)
-    await db.units.bulkAdd([
-      { name: "Campos do Jordão", type: "Unidade de Lazer", active: true },
-      { name: "Guarujá", type: "Unidade de Lazer", active: true },
-      { name: "Socorro", type: "Unidade de Lazer", active: true },
-      { name: "Sede Social", type: "Sede Social", active: true },
-    ]);
+  const sede = [
+    "Administrativo",
+    "Almoxarifado",
+    "Assistência à Saúde",
+    "Áudio Visual",
+    "Central de Relacionamento",
+    "Controladoria",
+    "Educação e Cultura",
+    "Departamento Pessoal",
+    "Esportes",
+    "Eventos",
+    "Gestão de Pessoas",
+    "Marketing",
+    "Meio Ambiente",
+    "Obras",
+    "Ouvidoria",
+    "Qualidade",
+    "Restaurante",
+    "Serviços Gerais",
+    "Social",
+    "Tecnologia da Informação",
+    "Transportes",
+    "Turismo",
+    "Patrimônio",
+    "Suprimentos e Logística",
+  ];
+  const lazer = [
+    "Boraceia",
+    "Caraguatatuba",
+    "Guarujá",
+    "Itanhaém",
+    "Maresias",
+    "Peruíbe I",
+    "Peruíbe II",
+    "Ubatuba",
+    "Areado",
+    "Avaré",
+    "Amparo",
+    "Lindóia",
+    "São Lourenço",
+    "Serra Negra",
+    "Socorro",
+    "Appenzell Campos do Jordão",
+    "Campos do Jordão",
+    "Monte Verde",
+    "Poços de Caldas I",
+    "Poços de Caldas II",
+    "Saha Campos do Jordão",
+    "São Pedro",
+    "Termas de Ibirá",
+    "Fazenda de Ibirá",
+    "Dois Córregos",
+    "Unidade Capital",
+  ];
+  const existing = new Set(
+    (await db.units.toArray()).map((u) => `${u.type}|${u.name}`),
+  );
+  const missing: Unit[] = [
+    ...sede.map((name) => ({
+      name,
+      type: "Sede Social" as const,
+      active: true,
+    })),
+    ...lazer.map((name) => ({
+      name,
+      type: "Unidade de Lazer" as const,
+      active: true,
+    })),
+  ].filter((u) => !existing.has(`${u.type}|${u.name}`));
+  if (missing.length) await db.units.bulkAdd(missing);
+  await db.units
+    .filter((u) =>
+      [
+        "Sede Social",
+        "UL Campos do Jordão",
+        "UL Guarujá",
+        "UL Socorro",
+      ].includes(u.name),
+    )
+    .delete();
 }

@@ -28,6 +28,8 @@ export interface Checklist {
   id?: number;
   name: string;
   fileName: string;
+  locationType: LocationType;
+  unit: string;
   items: ChecklistItem[];
   createdAt: string;
 }

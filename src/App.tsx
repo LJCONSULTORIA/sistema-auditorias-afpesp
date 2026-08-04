@@ -13,10 +13,9 @@ import {
   BarChart3,
   Building2,
   ClipboardCheck,
-  Database,
   Download,
   FileDown,
-  Home,
+  LogOut,
   Menu,
   Plus,
   Save,
@@ -64,14 +63,24 @@ const classes: Classification[] = [
   "Risco",
 ];
 const today = () => new Date().toISOString().slice(0, 10);
-function Layout({ children }: { children: React.ReactNode }) {
+const sessionKey = "AFPESP_AUDITOR_ATUAL";
+const loggedAuditor = () => localStorage.getItem(sessionKey) || "";
+const formatDate = (value: string) =>
+  value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "—";
+function Layout({
+  children,
+  user,
+  onLogout,
+}: {
+  children: React.ReactNode;
+  user: string;
+  onLogout: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const links = [
-    [Home, "/", "Início"],
-    [BarChart3, "/dashboard", "Dashboard"],
+    [BarChart3, "/", "Dashboard"],
     [ClipboardCheck, "/auditorias", "Auditorias"],
     [Building2, "/cadastros", "Cadastros"],
-    [Database, "/backup", "Backup"],
   ] as const;
   return (
     <div className="min-h-screen">
@@ -83,6 +92,15 @@ function Layout({ children }: { children: React.ReactNode }) {
           <div>
             <div className="font-bold">AFPESP</div>
             <div className="text-xs text-afpesp-100">Auditorias Internas</div>
+          </div>
+          <div className="ml-auto flex items-center gap-4 text-sm">
+            <span className="font-semibold">{user}</span>
+            <button
+              className="btn border border-white/30 bg-white/10 text-white hover:bg-white/20"
+              onClick={onLogout}
+            >
+              <LogOut size={16} /> Encerrar sessão
+            </button>
           </div>
         </div>
       </header>
@@ -105,6 +123,76 @@ function Layout({ children }: { children: React.ReactNode }) {
           ))}
         </aside>
         <main className="min-w-0 flex-1 p-4 md:p-8">{children}</main>
+      </div>
+    </div>
+  );
+}
+function Login({ onLogin }: { onLogin: (name: string) => void }) {
+  const auditors =
+    useLiveQuery(() => db.auditors.where("active").equals(1).toArray(), []) ??
+    [];
+  const [selected, setSelected] = useState("");
+  const [newName, setNewName] = useState("");
+  const enter = async () => {
+    let name = selected;
+    if (!name && newName.trim()) {
+      name = newName.trim();
+      if (!(await db.auditors.where("name").equals(name).count()))
+        await db.auditors.add({ name, role: "Auditor", active: true });
+    }
+    if (name) onLogin(name);
+  };
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+      <div className="card w-full max-w-md p-8">
+        <div className="mb-6 text-center">
+          <h1 className="text-3xl font-bold text-afpesp-700">
+            Sistema de Auditorias
+          </h1>
+          <p className="mt-2 text-slate-500">Auditorias Internas AFPESP</p>
+        </div>
+        {auditors.length > 0 && (
+          <Field label="Auditor cadastrado">
+            <select
+              className="field"
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+            >
+              <option value="">Selecione seu nome</option>
+              {auditors.map((a) => (
+                <option key={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <div className="my-4 flex items-center gap-3 text-xs text-slate-400">
+          <span className="h-px flex-1 bg-slate-200" />
+          <span>
+            {auditors.length
+              ? "ou cadastre um novo auditor"
+              : "primeiro acesso"}
+          </span>
+          <span className="h-px flex-1 bg-slate-200" />
+        </div>
+        <Field label="Nome do auditor">
+          <input
+            className="field"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && enter()}
+            placeholder="Nome completo"
+          />
+        </Field>
+        <button
+          className="btn-primary mt-5 w-full"
+          disabled={!selected && !newName.trim()}
+          onClick={enter}
+        >
+          Acessar sistema
+        </button>
+        <p className="mt-4 text-center text-xs text-slate-400">
+          A identificação é armazenada localmente neste navegador.
+        </p>
       </div>
     </div>
   );
@@ -149,30 +237,197 @@ function Stat({
 }
 function HomePage() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
+  const units =
+    useLiveQuery(() => db.units.where("active").equals(1).toArray(), []) ?? [];
+  const nav = useNavigate();
+  const [type, setType] = useState<LocationType | "Todos">("Todos");
+  const [unit, setUnit] = useState("Todos");
+  const [period, setPeriod] = useState("Todas as datas");
+  useEffect(() => setUnit("Todos"), [type]);
+  const now = new Date();
+  const filtered = audits.filter((a) => {
+    if (type !== "Todos" && a.locationType !== type) return false;
+    if (unit !== "Todos" && a.unit !== unit) return false;
+    if (
+      period === "Este ano" &&
+      !a.startDate.startsWith(String(now.getFullYear()))
+    )
+      return false;
+    if (
+      period === "Este mês" &&
+      !a.startDate.startsWith(
+        `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
+      )
+    )
+      return false;
+    return true;
+  });
+  const answers = filtered.flatMap((a) => a.answers);
+  const counts = classes.map(
+    (c) => answers.filter((a) => a.classification === c).length,
+  );
+  const reqs = [
+    ...new Set(
+      answers
+        .filter((a) => a.classification === "Não Conforme")
+        .map((a) => a.requirement),
+    ),
+  ]
+    .filter(Boolean)
+    .sort();
+  const visibleUnits = units.filter((u) => type === "Todos" || u.type === type);
   return (
     <>
       <PageTitle
-        title="Sistema de Auditorias Internas"
-        subtitle="Selecione Auditorias para consultar um local ou cadastrar uma nova auditoria."
+        title="Sistema de Auditorias"
+        subtitle="Dashboard de Auditorias AFPESP"
       />
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="card mb-5 grid gap-4 md:grid-cols-[1fr_1fr_1fr_auto]">
+        <Field label="Tipo de local">
+          <select
+            className="field"
+            value={type}
+            onChange={(e) => setType(e.target.value as LocationType | "Todos")}
+          >
+            <option>Todos</option>
+            <option>Unidade de Lazer</option>
+            <option>Sede Social</option>
+          </select>
+        </Field>
+        <Field label="Local / Setor">
+          <select
+            className="field"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+          >
+            <option>Todos</option>
+            {visibleUnits.map((u) => (
+              <option key={u.id}>{u.name}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Período">
+          <select
+            className="field"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+          >
+            <option>Todas as datas</option>
+            <option>Este mês</option>
+            <option>Este ano</option>
+          </select>
+        </Field>
+        <button className="btn-primary self-end">Atualizar</button>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
         <Stat
-          title="Programadas"
-          value={String(audits.filter((a) => a.status === "Programada").length)}
+          title="Auditorias"
+          value={String(filtered.length)}
           icon={<ClipboardCheck />}
+        />
+        <Stat
+          title="Finalizadas"
+          value={String(
+            filtered.filter((a) => a.status === "Finalizada").length,
+          )}
+          icon={<ArchiveRestore />}
         />
         <Stat
           title="Em andamento"
           value={String(
-            audits.filter((a) => a.status === "Em andamento").length,
+            filtered.filter((a) => a.status === "Em andamento").length,
           )}
           icon={<Settings />}
         />
         <Stat
-          title="Finalizadas"
-          value={String(audits.filter((a) => a.status === "Finalizada").length)}
-          icon={<ArchiveRestore />}
+          title="Conformidades"
+          value={String(counts[0])}
+          icon={<ClipboardCheck />}
         />
+        <Stat
+          title="Não conformidades"
+          value={String(counts[1])}
+          icon={<ClipboardCheck />}
+        />
+        <Stat
+          title="Oportunidades"
+          value={String(counts[2])}
+          icon={<ClipboardCheck />}
+        />
+        <Stat
+          title="Riscos"
+          value={String(counts[3])}
+          icon={<ClipboardCheck />}
+        />
+        <Stat
+          title="Locais auditados"
+          value={String(
+            new Set(filtered.map((a) => `${a.locationType}|${a.unit}`)).size,
+          )}
+          icon={<Building2 />}
+        />
+      </div>
+      <div className="my-5 flex flex-wrap gap-3">
+        <button className="btn-primary" onClick={() => nav("/auditorias")}>
+          <Plus size={16} />
+          Nova auditoria
+        </button>
+        <button className="btn-primary" onClick={() => nav("/auditorias")}>
+          <Upload size={16} />
+          Importar novo checklist
+        </button>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="card">
+          <h2 className="text-xl font-bold text-afpesp-700">
+            Resultado das auditorias
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Distribuição dos resultados no período/filtro selecionado.
+          </p>
+          <Doughnut
+            data={{
+              labels: classes,
+              datasets: [
+                {
+                  data: counts,
+                  backgroundColor: ["#2e7d32", "#d32f2f", "#ed6c02", "#8e24aa"],
+                },
+              ],
+            }}
+            options={{ plugins: { legend: { position: "bottom" } } }}
+          />
+        </div>
+        <div className="card">
+          <h2 className="text-xl font-bold text-afpesp-700">
+            Não conformidades por requisito
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Quantidade de NC por requisito aplicável.
+          </p>
+          <Bar
+            data={{
+              labels: reqs,
+              datasets: [
+                {
+                  label: "Não conformidades",
+                  data: reqs.map(
+                    (r) =>
+                      answers.filter(
+                        (a) =>
+                          a.requirement === r &&
+                          a.classification === "Não Conforme",
+                      ).length,
+                  ),
+                  backgroundColor: "#0867a7",
+                },
+              ],
+            }}
+            options={{
+              scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+            }}
+          />
+        </div>
       </div>
     </>
   );
@@ -245,34 +500,35 @@ function Dashboard() {
 }
 function AuditHub() {
   const nav = useNavigate();
-  const [type, setType] = useState<LocationType | "">("");
-  const [unit, setUnit] = useState("");
+  const [type, setType] = useState<LocationType | "Todos">("Todos");
+  const [unit, setUnit] = useState("Todos");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [status, setStatus] = useState<Audit["status"] | "Todos">("Todos");
   const units =
     useLiveQuery<Unit[]>(
       () =>
-        type
+        type !== "Todos"
           ? db.units
               .where("type")
               .equals(type)
               .and((u) => u.active)
               .toArray()
-          : Promise.resolve([] as Unit[]),
+          : db.units.where("active").equals(1).toArray(),
       [type],
     ) ?? [];
   const audits =
     useLiveQuery<Audit[]>(
       () =>
-        unit
+        unit !== "Todos"
           ? db.audits.where("unit").equals(unit).toArray()
-          : Promise.resolve([] as Audit[]),
+          : db.audits.toArray(),
       [unit],
     ) ?? [];
-  useEffect(() => setUnit(""), [type]);
+  useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
     (a) =>
+      (type === "Todos" || a.locationType === type) &&
       (!dateFrom || a.startDate >= dateFrom) &&
       (!dateTo || a.startDate <= dateTo) &&
       (status === "Todos" || a.status === status),
@@ -299,97 +555,84 @@ function AuditHub() {
           <select
             className="field"
             value={type}
-            onChange={(e) => setType(e.target.value as LocationType | "")}
+            onChange={(e) => setType(e.target.value as LocationType | "Todos")}
           >
-            <option value="">Selecione</option>
+            <option>Todos</option>
             <option>Unidade de Lazer</option>
             <option>Sede Social</option>
           </select>
         </Field>
-        {type && (
-          <Field
-            label={
-              type === "Unidade de Lazer"
-                ? "Unidade de Lazer"
-                : "Local da Sede Social"
+        <Field label="Local / Setor">
+          <select
+            className="field"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+          >
+            <option>Todos</option>
+            {units.map((u) => (
+              <option key={u.id}>{u.name}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Data inicial">
+          <input
+            type="date"
+            className="field"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+          />
+        </Field>
+        <Field label="Data final">
+          <input
+            type="date"
+            className="field"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+          />
+        </Field>
+        <Field label="Status">
+          <select
+            className="field"
+            value={status}
+            onChange={(e) =>
+              setStatus(e.target.value as Audit["status"] | "Todos")
             }
           >
-            <select
-              className="field"
-              value={unit}
-              onChange={(e) => setUnit(e.target.value)}
-            >
-              <option value="">Selecione</option>
-              {units.map((u) => (
-                <option key={u.id}>{u.name}</option>
-              ))}
-            </select>
-          </Field>
-        )}
-        {unit && (
-          <>
-            <Field label="Data inicial">
-              <input
-                type="date"
-                className="field"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </Field>
-            <Field label="Data final">
-              <input
-                type="date"
-                className="field"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </Field>
-            <Field label="Status">
-              <select
-                className="field"
-                value={status}
-                onChange={(e) =>
-                  setStatus(e.target.value as Audit["status"] | "Todos")
-                }
-              >
-                <option>Todos</option>
-                <option>Programada</option>
-                <option>Em andamento</option>
-                <option>Finalizada</option>
-              </select>
-            </Field>
-          </>
-        )}
+            <option>Todos</option>
+            <option>Programada</option>
+            <option>Em andamento</option>
+            <option>Finalizada</option>
+          </select>
+        </Field>
       </div>
-      {unit && (
-        <>
-          <div className="my-6 flex justify-end">
-            <button
-              className="btn-primary"
-              onClick={() =>
-                nav(
-                  `/auditorias/nova?type=${encodeURIComponent(type)}&unit=${encodeURIComponent(unit)}`,
-                )
-              }
-            >
-              <Plus size={16} />
-              Nova auditoria
-            </button>
-          </div>
-          <div className="grid gap-5 lg:grid-cols-3">
-            {(["Programada", "Em andamento", "Finalizada"] as const).map(
-              (status) => (
-                <AuditColumn
-                  key={status}
-                  status={status}
-                  audits={filtered.filter((a) => a.status === status)}
-                  onOpen={(id) => nav(`/auditorias/${id}`)}
-                />
-              ),
-            )}
-          </div>
-        </>
-      )}
+      <>
+        <div className="my-6 flex justify-end">
+          <button
+            className="btn-primary"
+            disabled={type === "Todos" || unit === "Todos"}
+            onClick={() =>
+              nav(
+                `/auditorias/nova?type=${encodeURIComponent(type)}&unit=${encodeURIComponent(unit)}`,
+              )
+            }
+          >
+            <Plus size={16} />
+            Nova auditoria
+          </button>
+        </div>
+        <div className="grid gap-5 lg:grid-cols-3">
+          {(["Programada", "Em andamento", "Finalizada"] as const).map(
+            (status) => (
+              <AuditColumn
+                key={status}
+                status={status}
+                audits={filtered.filter((a) => a.status === status)}
+                onOpen={(id) => nav(`/auditorias/${id}`)}
+              />
+            ),
+          )}
+        </div>
+      </>
     </>
   );
 }
@@ -404,7 +647,15 @@ function AuditColumn({
 }) {
   return (
     <div className="card">
-      <h2 className="mb-3 font-bold">{status}s</h2>
+      <h2 className="mb-3 font-bold">
+        {
+          {
+            Programada: "Programadas",
+            "Em andamento": "Em andamento",
+            Finalizada: "Finalizadas",
+          }[status]
+        }
+      </h2>
       {audits.length ? (
         audits.map((a) => (
           <button
@@ -412,10 +663,11 @@ function AuditColumn({
             onClick={() => onOpen(a.id!)}
             className="mb-2 w-full rounded-lg border p-3 text-left hover:bg-slate-50"
           >
-            <div className="font-medium">{a.checklistName}</div>
+            <div className="font-semibold text-afpesp-700">
+              {formatDate(a.startDate)}
+            </div>
             <div className="text-sm text-slate-500">
-              {a.startDate}
-              {a.auditors.length ? ` · ${a.auditors.join(", ")}` : ""}
+              Auditor: {a.auditors.join(", ") || "Não identificado"}
             </div>
           </button>
         ))
@@ -465,21 +717,27 @@ function AuditForm() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const nav = useNavigate();
-  const auditors =
-    useLiveQuery(() => db.auditors.where("active").equals(1).toArray(), []) ??
-    [];
+  const auditorAtual = loggedAuditor();
+  const locationType =
+    (params.get("type") as LocationType) || "Unidade de Lazer";
+  const selectedUnit = params.get("unit") || "";
   const checklists =
     useLiveQuery(
-      () => db.checklists.orderBy("createdAt").reverse().toArray(),
-      [],
+      () =>
+        db.checklists
+          .filter(
+            (c) => c.unit === selectedUnit && c.locationType === locationType,
+          )
+          .sortBy("createdAt"),
+      [selectedUnit, locationType],
     ) ?? [];
   const [mode, setMode] = useState<"anterior" | "novo">("anterior");
   const [error, setError] = useState("");
   const [audit, setAudit] = useState<Audit>({
-    locationType: (params.get("type") as LocationType) || "Unidade de Lazer",
-    unit: params.get("unit") || "",
+    locationType,
+    unit: selectedUnit,
     checklistName: "",
-    auditors: [],
+    auditors: auditorAtual ? [auditorAtual] : [],
     startDate: today(),
     endDate: today(),
     scope: "",
@@ -516,6 +774,8 @@ function AuditForm() {
       const checklist: Checklist = {
         name,
         fileName: file.name,
+        locationType: audit.locationType,
+        unit: audit.unit,
         items,
         createdAt: new Date().toISOString(),
       };
@@ -690,22 +950,12 @@ function AuditForm() {
       {(id || audit.answers.length > 0) && (
         <div className="mt-6 space-y-4">
           <div className="card grid gap-4 md:grid-cols-3">
-            <Field label="Auditores">
-              <select
-                multiple
-                className="field min-h-24"
-                value={audit.auditors}
-                onChange={(e) =>
-                  setAudit({
-                    ...audit,
-                    auditors: [...e.target.selectedOptions].map((o) => o.value),
-                  })
-                }
-              >
-                {auditors.map((a) => (
-                  <option key={a.id}>{a.name}</option>
-                ))}
-              </select>
+            <Field label="Auditor responsável">
+              <input
+                className="field bg-slate-100"
+                readOnly
+                value={audit.auditors.join(", ") || auditorAtual}
+              />
             </Field>
             <Field label="Situação">
               <select
@@ -987,19 +1237,27 @@ function Backup() {
   );
 }
 export default function App() {
+  const [user, setUser] = useState(loggedAuditor());
   useEffect(() => {
     seed();
   }, []);
+  const login = (name: string) => {
+    localStorage.setItem(sessionKey, name);
+    setUser(name);
+  };
+  const logout = () => {
+    localStorage.removeItem(sessionKey);
+    setUser("");
+  };
+  if (!user) return <Login onLogin={login} />;
   return (
-    <Layout>
+    <Layout user={user} onLogout={logout}>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/auditorias" element={<AuditHub />} />
         <Route path="/auditorias/nova" element={<AuditForm />} />
         <Route path="/auditorias/:id" element={<AuditForm />} />
         <Route path="/cadastros" element={<Cadastros />} />
-        <Route path="/backup" element={<Backup />} />
       </Routes>
     </Layout>
   );
