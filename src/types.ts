@@ -37,6 +37,10 @@ export interface DocumentReference {
   title: string;
   version: string;
 }
+export interface RegisteredDocument extends DocumentReference {
+  id?: number;
+  active: boolean;
+}
 export interface Checklist {
   id?: number;
   name: string;

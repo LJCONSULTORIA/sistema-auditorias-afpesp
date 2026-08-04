@@ -46,6 +46,7 @@ import type {
   Classification,
   DocumentReference,
   LocationType,
+  RegisteredDocument,
   Unit,
 } from "./types";
 import { exportDocx, exportExcel } from "./reports";
@@ -63,6 +64,14 @@ const classes: Classification[] = [
   "Oportunidade de Melhoria",
   "Risco",
 ];
+const documentTypes = [
+  "Procedimento Operacional",
+  "Instrução de Trabalho",
+  "Especificação",
+  "MOD G",
+  "Legislação",
+  "Norma",
+] as const;
 const today = () => new Date().toISOString().slice(0, 10);
 const sessionKey = "AFPESP_AUDITOR_ATUAL";
 const loggedAuditor = () => localStorage.getItem(sessionKey) || "";
@@ -702,46 +711,22 @@ async function readChecklist(file: File): Promise<ChecklistItem[]> {
   const rKey = findKey("requisito aplicavel", "requisito", "iso", "clausula");
   const numberKey = findKey("nº", "numero", "n.");
   const processKey = findKey("processo", "assunto");
-  const typeKey = findKey("tipo do documento", "tipo documento", "tipo");
-  const codeKey = findKey("codigo do documento", "codigo documento", "codigo");
-  const titleKey = findKey("titulo do documento", "titulo documento", "titulo");
-  const versionKey = findKey("versao", "versão");
   if (!qKey)
     throw new Error(
       "Não foi localizada uma coluna de Questão/Pergunta/Item na planilha.",
     );
-  const splitCell = (value: unknown) =>
-    String(value ?? "")
-      .split(/\r?\n|\s+\|\s+/)
-      .map((part) => part.trim())
-      .filter(Boolean);
   return rows
-    .map((r, index) => {
-      const types = typeKey ? splitCell(r[typeKey]) : [];
-      const codes = codeKey ? splitCell(r[codeKey]) : [];
-      const titles = titleKey ? splitCell(r[titleKey]) : [];
-      const versions = versionKey ? splitCell(r[versionKey]) : [];
-      const documentCount = Math.max(types.length, codes.length, titles.length, versions.length);
-      const documents: DocumentReference[] = Array.from(
-        { length: documentCount },
-        (_, documentIndex) => ({
-          type: types[documentIndex] ?? "",
-          code: codes[documentIndex] ?? "",
-          title: titles[documentIndex] ?? "",
-          version: versions[documentIndex] ?? "",
-        }),
-      ).filter((document) => document.type || document.code || document.title || document.version);
-      return {
+    .map((r, index) => ({
       number: numberKey ? Number(r[numberKey]) || index + 1 : index + 1,
       process: processKey ? String(r[processKey]).trim() : "",
       requirement: rKey ? String(r[rKey]).trim() : "",
       question: String(r[qKey]).trim(),
-      documentType: typeKey ? String(r[typeKey]).trim() : "",
-      documentCode: codeKey ? String(r[codeKey]).trim() : "",
-      documentTitle: titleKey ? String(r[titleKey]).trim() : "",
-      documentVersion: versionKey ? String(r[versionKey]).trim() : "",
-      documents,
-    }})
+      documentType: "",
+      documentCode: "",
+      documentTitle: "",
+      documentVersion: "",
+      documents: [],
+    }))
     .filter((x) => x.question);
 }
 const answerDocuments = (answer: Answer): DocumentReference[] =>
@@ -773,6 +758,8 @@ function AuditForm() {
           .sortBy("createdAt"),
       [selectedUnit, locationType],
     ) ?? [];
+  const registeredDocuments =
+    useLiveQuery(() => db.documents.filter((document) => document.active).toArray(), []) ?? [];
   const [mode, setMode] = useState<"anterior" | "novo">("anterior");
   const [error, setError] = useState("");
   const [audit, setAudit] = useState<Audit>({
@@ -829,38 +816,6 @@ function AuditForm() {
       };
       const cid = await db.checklists.add(checklist);
       fromChecklist({ ...checklist, id: cid });
-      setError("");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-  const refreshChecklistData = async (file?: File) => {
-    if (!file) return;
-    try {
-      const items = await readChecklist(file);
-      if (items.length !== audit.answers.length)
-        throw new Error(
-          `A planilha possui ${items.length} questões, mas esta auditoria possui ${audit.answers.length}. Selecione o mesmo checklist que originou a auditoria.`,
-        );
-      const answers = audit.answers.map((answer, index) => ({
-        ...answer,
-        questionId: items[index].number,
-        process: items[index].process,
-        question: items[index].question,
-        requirement: items[index].requirement,
-        documentType: items[index].documentType,
-        documentCode: items[index].documentCode,
-        documentTitle: items[index].documentTitle,
-        documentVersion: items[index].documentVersion,
-        documents: items[index].documents,
-      }));
-      const updated = { ...audit, answers, updatedAt: new Date().toISOString() };
-      setAudit(updated);
-      if (id) await db.audits.put({ ...updated, id: Number(id) });
-      if (updated.checklistId) {
-        const checklist = await db.checklists.get(updated.checklistId);
-        if (checklist) await db.checklists.put({ ...checklist, items });
-      }
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -1094,23 +1049,6 @@ function AuditForm() {
               />
             </Field>
           </div>
-          {id && audit.answers.some((answer) =>
-            !answer.requirement ||
-            answerDocuments(answer).length === 0,
-          ) && (
-            <div className="card border-amber-300 bg-amber-50">
-              <h2 className="font-bold text-amber-900">Atualizar dados do checklist</h2>
-              <p className="my-2 text-sm text-amber-800">
-                Esta auditoria foi criada antes da importação completa dos documentos aplicáveis. Selecione o mesmo Excel para recuperar Processo, Requisito, Tipo, Código, Título e Versão, sem apagar as respostas.
-              </p>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                className="field bg-white"
-                onChange={(e) => refreshChecklistData(e.target.files?.[0])}
-              />
-            </div>
-          )}
           {audit.answers.map((ans, i) => (
             <div className="card" key={ans.id}>
               <div className="mb-5 flex gap-3">
@@ -1127,13 +1065,34 @@ function AuditForm() {
                       <div className="mb-1 font-semibold">Documentos aplicáveis:</div>
                       <ul className="space-y-1">
                         {answerDocuments(ans).map((document, documentIndex) => (
-                          <li key={`${document.code}-${documentIndex}`}>
-                            {documentIndex + 1}. {[document.type, document.code, document.title, document.version && `Versão ${document.version}`].filter(Boolean).join(" — ")}
+                          <li key={`${document.code}-${document.version}-${documentIndex}`} className="flex items-start justify-between gap-3">
+                            <span>{documentIndex + 1}. {[document.type, document.code, document.title, document.version && `versão ${document.version}`].filter(Boolean).join(" — ")}</span>
+                            <button
+                              type="button"
+                              className="shrink-0 text-red-600"
+                              title="Remover documento desta questão"
+                              onClick={() => update(i, { documents: answerDocuments(ans).filter((_, index) => index !== documentIndex) })}
+                            >
+                              <X size={16} />
+                            </button>
                           </li>
                         ))}
                       </ul>
                     </div>
                   )}
+                  <DocumentPicker
+                    documents={registeredDocuments}
+                    onAdd={(document) => {
+                      const current = answerDocuments(ans);
+                      const exists = current.some((item) =>
+                        item.type === document.type &&
+                        item.code === document.code &&
+                        item.title === document.title &&
+                        item.version === document.version,
+                      );
+                      if (!exists) update(i, { documents: [...current, document] });
+                    }}
+                  />
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -1221,6 +1180,67 @@ function AuditForm() {
     </>
   );
 }
+function DocumentPicker({
+  documents,
+  onAdd,
+}: {
+  documents: RegisteredDocument[];
+  onAdd: (document: DocumentReference) => void;
+}) {
+  const [type, setType] = useState("");
+  const [code, setCode] = useState("");
+  const [title, setTitle] = useState("");
+  const [version, setVersion] = useState("");
+  const unique = (values: string[]) => [...new Set(values)].filter(Boolean).sort();
+  const codes = unique(documents.filter((document) => document.type === type).map((document) => document.code));
+  const titles = unique(documents.filter((document) => document.type === type && document.code === code).map((document) => document.title));
+  const versions = unique(documents.filter((document) => document.type === type && document.code === code && document.title === title).map((document) => document.version));
+  const selected = documents.find((document) =>
+    document.type === type &&
+    document.code === code &&
+    document.title === title &&
+    document.version === version,
+  );
+  return (
+    <div className="mt-3 rounded-lg border border-dashed border-slate-300 p-3">
+      <div className="mb-2 text-sm font-semibold text-slate-700">Adicionar documento aplicável</div>
+      {documents.length ? (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.5fr_.8fr_auto]">
+          <select className="field" value={type} onChange={(e) => { setType(e.target.value); setCode(""); setTitle(""); setVersion(""); }}>
+            <option value="">Tipo de documento</option>
+            {documentTypes.filter((item) => documents.some((document) => document.type === item)).map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <select className="field" value={code} disabled={!type} onChange={(e) => { setCode(e.target.value); setTitle(""); setVersion(""); }}>
+            <option value="">Código</option>
+            {codes.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <select className="field" value={title} disabled={!code} onChange={(e) => { setTitle(e.target.value); setVersion(""); }}>
+            <option value="">Nome do documento</option>
+            {titles.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <select className="field" value={version} disabled={!title} onChange={(e) => setVersion(e.target.value)}>
+            <option value="">Versão</option>
+            {versions.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <button
+            type="button"
+            className="btn-primary px-3"
+            disabled={!selected}
+            onClick={() => {
+              if (!selected) return;
+              onAdd({ type: selected.type, code: selected.code, title: selected.title, version: selected.version });
+              setType(""); setCode(""); setTitle(""); setVersion("");
+            }}
+          >
+            <Plus size={16} /> Adicionar
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-amber-700">Cadastre os documentos na tela Cadastros antes de vinculá-los às questões.</p>
+      )}
+    </div>
+  );
+}
 function Field({
   label,
   children,
@@ -1240,11 +1260,14 @@ function Cadastros() {
     <>
       <PageTitle
         title="Cadastros"
-        subtitle="Cadastre os locais e auditores disponíveis para seleção."
+        subtitle="Cadastre os locais, auditores e documentos disponíveis para seleção."
       />
       <div className="grid gap-6 lg:grid-cols-2">
         <Locations />
         <CrudAuditors />
+        <div className="lg:col-span-2">
+          <DocumentsRegistry />
+        </div>
       </div>
     </>
   );
@@ -1344,6 +1367,91 @@ function CrudAuditors() {
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+function DocumentsRegistry() {
+  const items = useLiveQuery(() => db.documents.toArray(), []) ?? [];
+  const [type, setType] = useState<(typeof documentTypes)[number]>("Procedimento Operacional");
+  const [code, setCode] = useState("");
+  const [title, setTitle] = useState("");
+  const [version, setVersion] = useState("");
+  const [search, setSearch] = useState("");
+  const [message, setMessage] = useState("");
+  const filtered = items
+    .filter((document) => document.type === type)
+    .filter((document) => !search.trim() || normalize(`${document.code} ${document.title} ${document.version}`).includes(normalize(search)))
+    .sort((a, b) => `${a.code} ${a.title} ${a.version}`.localeCompare(`${b.code} ${b.title} ${b.version}`, "pt-BR"));
+  const add = async () => {
+    if (!code.trim() || !title.trim() || !version.trim()) {
+      setMessage("Preencha código, nome do documento e versão.");
+      return;
+    }
+    const record: RegisteredDocument = {
+      type,
+      code: code.trim(),
+      title: title.trim(),
+      version: version.trim(),
+      active: true,
+    };
+    const duplicate = items.some((document) =>
+      normalize(document.type) === normalize(record.type) &&
+      normalize(document.code) === normalize(record.code) &&
+      normalize(document.title) === normalize(record.title) &&
+      normalize(document.version) === normalize(record.version),
+    );
+    if (duplicate) {
+      setMessage("Este documento e versão já estão cadastrados.");
+      return;
+    }
+    await db.documents.add(record);
+    setCode(""); setTitle(""); setVersion(""); setMessage("");
+  };
+  return (
+    <div className="card">
+      <h2 className="mb-4 flex items-center gap-2 font-bold">
+        <ClipboardCheck /> Documentos
+      </h2>
+      <div className="mb-4 grid gap-3 md:grid-cols-2">
+        <Field label="Filtrar por tipo de documento">
+          <select className="field" value={type} onChange={(e) => setType(e.target.value as (typeof documentTypes)[number])}>
+            {documentTypes.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </Field>
+        <Field label="Localizar documento cadastrado">
+          <input className="field" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Código, nome ou versão" />
+        </Field>
+      </div>
+      <div className="grid gap-3 md:grid-cols-[1fr_2fr_.7fr_auto]">
+        <Field label="Código do documento">
+          <input className="field" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Ex.: SUP 001" />
+        </Field>
+        <Field label="Nome do documento">
+          <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Compras de Serviços e Produtos" />
+        </Field>
+        <Field label="Versão">
+          <input className="field" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="Ex.: 012" />
+        </Field>
+        <button className="btn-primary self-end" onClick={add}><Plus size={16} /> Cadastrar</button>
+      </div>
+      {message && <p className="mt-3 text-sm text-red-700">{message}</p>}
+      <div className="mt-5 overflow-x-auto">
+        {filtered.length ? (
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr><th className="p-3">Tipo</th><th className="p-3">Código</th><th className="p-3">Nome do documento</th><th className="p-3">Versão</th><th className="w-16 p-3"></th></tr>
+            </thead>
+            <tbody>
+              {filtered.map((document) => (
+                <tr key={document.id} className="border-t">
+                  <td className="p-3">{document.type}</td><td className="p-3 font-semibold">{document.code}</td><td className="p-3">{document.title}</td><td className="p-3">{document.version}</td>
+                  <td className="p-3 text-right"><button className="text-red-600" title="Excluir documento" onClick={() => confirm("Excluir este documento cadastrado?") && db.documents.delete(document.id!)}><Trash2 size={16} /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : <p className="text-sm text-slate-500">Nenhum documento cadastrado neste tipo.</p>}
+      </div>
     </div>
   );
 }

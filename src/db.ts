@@ -1,11 +1,12 @@
 import Dexie, { type Table } from "dexie";
-import type { Audit, Auditor, Checklist, Question, Unit } from "./types";
+import type { Audit, Auditor, Checklist, Question, RegisteredDocument, Unit } from "./types";
 class AuditDB extends Dexie {
   audits!: Table<Audit, number>;
   units!: Table<Unit, number>;
   auditors!: Table<Auditor, number>;
   questions!: Table<Question, number>;
   checklists!: Table<Checklist, number>;
+  documents!: Table<RegisteredDocument, number>;
   constructor() {
     super("AFPESP_Auditorias");
     this.version(1).stores({
@@ -75,6 +76,14 @@ class AuditDB extends Dexie {
           audit.unit = String(audit.unit ?? "").trim().replace(/^UL\s+/i, "");
         });
       });
+    this.version(5).stores({
+      audits: "++id,status,locationType,unit,startDate,updatedAt",
+      units: "++id,&name,type,active",
+      auditors: "++id,&name,active",
+      questions: null,
+      checklists: "++id,name,createdAt",
+      documents: "++id,type,code,title,version,active",
+    });
   }
 }
 export const db = new AuditDB();
