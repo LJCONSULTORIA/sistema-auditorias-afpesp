@@ -256,12 +256,14 @@ function Stat({
   icon,
   detail,
   onClick,
+  active,
 }: {
   title: string;
   value: string;
   icon: React.ReactNode;
   detail?: string;
   onClick?: () => void;
+  active?: boolean;
 }) {
   const content = (
     <>
@@ -277,7 +279,7 @@ function Stat({
     <button
       type="button"
       onClick={onClick}
-      className="card flex min-h-36 w-full flex-col items-center justify-center gap-3 p-4 text-center transition hover:-translate-y-0.5 hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300"
+      className={`card flex min-h-36 w-full flex-col items-center justify-center gap-3 p-4 text-center transition hover:-translate-y-0.5 hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300 ${active ? "border-afpesp-500 bg-afpesp-50 ring-2 ring-afpesp-100" : ""}`}
     >
       {content}
     </button>
@@ -287,13 +289,13 @@ function Stat({
 }
 function HomePage() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
-  const checklists = useLiveQuery(() => db.checklists.toArray(), []) ?? [];
   const units =
     useLiveQuery(() => db.units.filter((item) => item.active).toArray(), []) ?? [];
   const nav = useNavigate();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
   const [unit, setUnit] = useState("Todos");
   const [period, setPeriod] = useState("Todas as datas");
+  const [selectedResult, setSelectedResult] = useState<Classification | null>(null);
   useEffect(() => setUnit("Todos"), [type]);
   const now = new Date();
   const filtered = audits.filter((a) => {
@@ -331,12 +333,6 @@ function HomePage() {
     .filter(Boolean)
     .sort();
   const visibleUnits = units.filter((u) => type === "Todos" || u.type === type);
-  const visibleChecklists = checklists.filter((checklist) =>
-    (type === "Todos" || checklist.locationType === type) &&
-    (unit === "Todos" ||
-      normalize(checklist.unit).replace(/^ul\s+/, "") ===
-        normalize(unit).replace(/^ul\s+/, "")),
-  );
   const statusCounts = [
     filtered.filter((audit) => audit.status === "Programada").length,
     filtered.filter((audit) => audit.status === "Em andamento").length,
@@ -346,6 +342,15 @@ function HomePage() {
     filtered.filter((audit) => audit.locationType === "Sede Social").length,
     filtered.filter((audit) => audit.locationType === "Unidade de Lazer").length,
   ];
+  const selectedAnswers = selectedResult
+    ? filtered.flatMap((audit) =>
+        audit.answers
+          .filter((answer) => answer.classification === selectedResult)
+          .map((answer) => ({ audit, answer })),
+      )
+    : [];
+  const resultLocations = [...new Set(selectedAnswers.map(({ audit }) => audit.unit))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const resultRequirements = [...new Set(selectedAnswers.map(({ answer }) => answer.requirement || "Não informado"))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   return (
     <>
       <PageTitle
@@ -389,7 +394,7 @@ function HomePage() {
         </Field>
       </div>
       <h2 className="mb-3 text-lg font-bold text-slate-800">Visão geral</h2>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Stat
           title="Total de auditorias"
           value={String(filtered.length)}
@@ -398,26 +403,19 @@ function HomePage() {
           onClick={() => nav("/auditorias")}
         />
         <Stat
-          title="Checklists cadastrados"
-          value={String(visibleChecklists.length)}
-          icon={<ClipboardCheck />}
-          detail="Modelos disponíveis"
-          onClick={() => nav("/auditorias")}
-        />
-        <Stat
-          title="Finalizadas"
+          title="Auditoria Finalizada"
           value={String(statusCounts[2])}
           icon={<ArchiveRestore />}
           onClick={() => nav("/auditorias?status=Finalizada")}
         />
         <Stat
-          title="Programadas"
+          title="Auditoria Programada"
           value={String(statusCounts[0])}
           icon={<ClipboardCheck />}
           onClick={() => nav("/auditorias?status=Programada")}
         />
         <Stat
-          title="Em andamento"
+          title="Auditoria em Andamento"
           value={String(statusCounts[1])}
           icon={<Settings />}
           onClick={() => nav("/auditorias?status=Em%20andamento")}
@@ -442,33 +440,40 @@ function HomePage() {
           title="Conformidades"
           value={String(counts[0])}
           icon={<ClipboardCheck />}
-          onClick={() => nav("/auditorias")}
+          onClick={() => setSelectedResult("Conforme")}
+          active={selectedResult === "Conforme"}
         />
         <Stat
           title="Não conformidades"
           value={String(counts[1])}
           icon={<ClipboardCheck />}
-          onClick={() => nav("/auditorias")}
+          onClick={() => setSelectedResult("Não Conforme")}
+          active={selectedResult === "Não Conforme"}
         />
         <Stat
           title="Oportunidades"
           value={String(counts[2])}
           icon={<ClipboardCheck />}
-          onClick={() => nav("/auditorias")}
+          onClick={() => setSelectedResult("Oportunidade de Melhoria")}
+          active={selectedResult === "Oportunidade de Melhoria"}
         />
         <Stat
           title="Riscos"
           value={String(counts[3])}
           icon={<ClipboardCheck />}
-          onClick={() => nav("/auditorias")}
+          onClick={() => setSelectedResult("Risco")}
+          active={selectedResult === "Risco"}
         />
       </div>
-      <div className="my-5">
-        <button className="btn-primary w-full sm:w-auto" onClick={() => nav("/auditorias")}>
-          <ClipboardCheck size={16} />
-          Gerenciar auditorias e checklists
-        </button>
-      </div>
+      {selectedResult && (
+        <ResultAnalysis
+          classification={selectedResult}
+          records={selectedAnswers}
+          locations={resultLocations}
+          requirements={resultRequirements}
+          onClose={() => setSelectedResult(null)}
+        />
+      )}
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="card p-4 sm:p-5">
           <h2 className="text-xl font-bold text-afpesp-700">
@@ -560,6 +565,92 @@ function HomePage() {
     </>
   );
 }
+function ResultAnalysis({
+  classification,
+  records,
+  locations,
+  requirements,
+  onClose,
+}: {
+  classification: Classification;
+  records: { audit: Audit; answer: Answer }[];
+  locations: string[];
+  requirements: string[];
+  onClose: () => void;
+}) {
+  const color = {
+    Conforme: "#2563eb",
+    "Não Conforme": "#e11d48",
+    "Oportunidade de Melhoria": "#38bdf8",
+    Risco: "#f59e0b",
+  }[classification];
+  return (
+    <section className="card my-6 border-afpesp-200 p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-afpesp-800">Análise — {classification}</h2>
+          <p className="mt-1 text-sm text-slate-500">{records.length} registro(s) conforme os filtros do dashboard.</p>
+        </div>
+        <button className="btn-secondary" onClick={onClose}><X size={16} /> Fechar análise</button>
+      </div>
+      {records.length ? (
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 p-4">
+            <h3 className="font-bold text-slate-800">Distribuição por local</h3>
+            <p className="mb-3 text-sm text-slate-500">Quantidade de registros em cada local ou setor.</p>
+            <div className="h-72"><Bar
+              data={{
+                labels: locations,
+                datasets: [{
+                  label: classification,
+                  data: locations.map((location) => records.filter(({ audit }) => audit.unit === location).length),
+                  backgroundColor: color,
+                  borderRadius: 10,
+                  borderSkipped: false,
+                  maxBarThickness: 58,
+                }],
+              }}
+              options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#e2e8f0" } } } }}
+            /></div>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4">
+            <h3 className="font-bold text-slate-800">Consolidação por requisito</h3>
+            <p className="mb-3 text-sm text-slate-500">Quantidade agrupada pelo requisito aplicável.</p>
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {requirements.map((requirement) => {
+                const total = records.filter(({ answer }) => (answer.requirement || "Não informado") === requirement).length;
+                return (
+                  <div key={requirement} className="flex items-center justify-between gap-4 rounded-lg bg-slate-50 px-3 py-2">
+                    <span className="min-w-0 break-words text-sm font-medium text-slate-700">{requirement}</span>
+                    <span className="shrink-0 rounded-full bg-afpesp-100 px-2.5 py-1 text-xs font-bold text-afpesp-800">{total}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4 lg:col-span-2">
+            <h3 className="font-bold text-slate-800">Todos os registros</h3>
+            <p className="mb-3 text-sm text-slate-500">Questões classificadas como {classification}.</p>
+            <div className="max-h-96 space-y-3 overflow-y-auto">
+              {records.map(({ audit, answer }, index) => (
+                <article key={`${audit.id}-${answer.id}-${index}`} className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <span className="font-bold text-afpesp-800">{audit.locationType} — {audit.unit}</span>
+                    <span className="text-sm text-slate-500">{formatDate(audit.startDate)}</span>
+                  </div>
+                  <p className="mt-2 break-words text-sm text-slate-700">{answer.question}</p>
+                  <p className="mt-2 text-xs font-semibold text-slate-500">Requisito: {answer.requirement || "Não informado"}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-5 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">Nenhum registro desta classificação no filtro selecionado.</p>
+      )}
+    </section>
+  );
+}
 function Dashboard() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
   const answers = audits
@@ -629,26 +720,33 @@ function Dashboard() {
     </>
   );
 }
-function downloadChecklistExcel(checklists: Checklist[]) {
-  const rows = checklists.flatMap((checklist) =>
-    checklist.items.map((item, index) => ({
-      Checklist: checklist.fileName || checklist.name,
-      "Tipo de local": checklist.locationType,
-      "Local / Setor": checklist.unit,
-      "Nº": item.number || index + 1,
-      Processo: item.process,
-      "Questão de auditoria": item.question,
-      "Requisito aplicável": item.requirement,
-    })),
-  );
+function downloadAuditChecklistExcel(audit: Audit) {
+  const rows = audit.answers.map((answer, index) => ({
+    "Nº": index + 1,
+    "Tipo de local": audit.locationType,
+    "Local / Setor": audit.unit,
+    "Data da auditoria": formatDate(audit.startDate),
+    Auditor: audit.auditors.join(", ") || "Não identificado",
+    Processo: answer.process,
+    "Questão de auditoria": answer.question,
+    "Requisito aplicável": answer.requirement,
+    Classificação: answer.classification || "",
+    "Evidência / constatação": answer.finding,
+    Recomendação: answer.recommendation,
+    "Documentos aplicáveis": (answer.documents ?? []).map((document) =>
+      [document.type, document.code, document.title, document.version && `versão ${document.version}`].filter(Boolean).join(" — "),
+    ).join(" | "),
+  }));
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(rows);
   worksheet["!cols"] = [
-    { wch: 38 }, { wch: 22 }, { wch: 24 }, { wch: 6 },
-    { wch: 30 }, { wch: 80 }, { wch: 22 },
+    { wch: 6 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 24 },
+    { wch: 30 }, { wch: 80 }, { wch: 22 }, { wch: 24 }, { wch: 55 },
+    { wch: 55 }, { wch: 70 },
   ];
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Checklists");
-  XLSX.writeFile(workbook, "checklists_auditoria_afpesp.xlsx");
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Checklist da auditoria");
+  const safeUnit = audit.unit.replace(/[^a-zA-Z0-9À-ÿ_-]+/g, "_");
+  XLSX.writeFile(workbook, `checklist_${safeUnit}_${audit.startDate}.xlsx`);
 }
 function AuditHub() {
   const nav = useNavigate();
@@ -677,8 +775,6 @@ function AuditHub() {
     ) ?? [];
   const audits =
     useLiveQuery<Audit[]>(() => db.audits.toArray(), []) ?? [];
-  const checklists =
-    useLiveQuery<Checklist[]>(() => db.checklists.orderBy("createdAt").toArray(), []) ?? [];
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
     (a) =>
@@ -688,28 +784,11 @@ function AuditHub() {
       (!dateTo || a.startDate <= dateTo) &&
       (status === "Todos" || a.status === status),
   );
-  const filteredChecklists = checklists.filter(
-    (checklist) =>
-      (type === "Todos" || checklist.locationType === type) &&
-      (unit === "Todos" ||
-        normalize(checklist.unit).replace(/^ul\s+/, "") === normalize(unit)),
-  );
   return (
     <>
       <PageTitle
         title="Auditorias"
         subtitle="Consulte, abra e gerencie as auditorias pelos filtros abaixo."
-        action={
-          filteredChecklists.length ? (
-            <button
-              className="btn-secondary"
-              onClick={() => downloadChecklistExcel(filteredChecklists)}
-            >
-              <FileDown size={16} />
-              Baixar checklist Excel
-            </button>
-          ) : undefined
-        }
       />
       <div className="card grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-5">
         <Field label="Tipo de local">
@@ -846,6 +925,13 @@ function AuditManagement({
                 onClick={(event) => { event.stopPropagation(); onOpen(a.id!); }}
               >
                 {a.status === "Finalizada" ? "Abrir auditoria" : a.status === "Em andamento" ? "Continuar auditoria" : "Iniciar auditoria"}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary w-full sm:w-auto"
+                onClick={(event) => { event.stopPropagation(); downloadAuditChecklistExcel(a); }}
+              >
+                <FileDown size={16} /> Baixar checklist Excel
               </button>
               {a.status === "Finalizada" && (
                 <button
