@@ -5,12 +5,12 @@
 @layer components { .card{@apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm} .btn{@apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50} .btn-primary{@apply btn bg-afpesp-600 text-white hover:bg-afpesp-700} .btn-secondary{@apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50} .field{@apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-afpesp-500 focus:ring-2 focus:ring-afpesp-100} .label{@apply mb-1 block text-sm font-medium text-slate-700} }
 @layer components {
   .classification-button { @apply min-h-12 rounded-lg border px-3 py-2 text-sm font-bold transition; }
-  .classification-conforme { border-color: #86efac; background-color: rgba(34, 197, 94, .22); color: #166534; }
+  .classification-conforme { border-color: rgba(34, 197, 94, .28); background-color: rgba(34, 197, 94, .07); color: #166534; }
   .classification-conforme.selected { border-color: #16a34a; background-color: #22c55e; color: white; @apply shadow; }
-  .classification-nao-conforme { border-color: #fca5a5; background-color: rgba(239, 68, 68, .22); color: #991b1b; }
+  .classification-nao-conforme { border-color: rgba(239, 68, 68, .28); background-color: rgba(239, 68, 68, .07); color: #991b1b; }
   .classification-nao-conforme.selected { border-color: #dc2626; background-color: #ef4444; color: white; @apply shadow; }
-  .classification-oportunidade { border-color: #93c5fd; background-color: rgba(59, 130, 246, .22); color: #1e40af; }
+  .classification-oportunidade { border-color: rgba(59, 130, 246, .28); background-color: rgba(59, 130, 246, .07); color: #1e40af; }
   .classification-oportunidade.selected { border-color: #2563eb; background-color: #3b82f6; color: white; @apply shadow; }
-  .classification-risco { border-color: #fde047; background-color: rgba(250, 204, 21, .28); color: #713f12; }
+  .classification-risco { border-color: rgba(234, 179, 8, .30); background-color: rgba(250, 204, 21, .09); color: #713f12; }
   .classification-risco.selected { border-color: #eab308; background-color: #facc15; color: #422006; @apply shadow; }
 }

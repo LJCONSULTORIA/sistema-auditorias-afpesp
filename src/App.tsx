@@ -44,6 +44,7 @@ import type {
   Checklist,
   ChecklistItem,
   Classification,
+  DocumentReference,
   LocationType,
   Unit,
 } from "./types";
@@ -709,8 +710,28 @@ async function readChecklist(file: File): Promise<ChecklistItem[]> {
     throw new Error(
       "Não foi localizada uma coluna de Questão/Pergunta/Item na planilha.",
     );
+  const splitCell = (value: unknown) =>
+    String(value ?? "")
+      .split(/\r?\n|\s+\|\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
   return rows
-    .map((r, index) => ({
+    .map((r, index) => {
+      const types = typeKey ? splitCell(r[typeKey]) : [];
+      const codes = codeKey ? splitCell(r[codeKey]) : [];
+      const titles = titleKey ? splitCell(r[titleKey]) : [];
+      const versions = versionKey ? splitCell(r[versionKey]) : [];
+      const documentCount = Math.max(types.length, codes.length, titles.length, versions.length);
+      const documents: DocumentReference[] = Array.from(
+        { length: documentCount },
+        (_, documentIndex) => ({
+          type: types[documentIndex] ?? "",
+          code: codes[documentIndex] ?? "",
+          title: titles[documentIndex] ?? "",
+          version: versions[documentIndex] ?? "",
+        }),
+      ).filter((document) => document.type || document.code || document.title || document.version);
+      return {
       number: numberKey ? Number(r[numberKey]) || index + 1 : index + 1,
       process: processKey ? String(r[processKey]).trim() : "",
       requirement: rKey ? String(r[rKey]).trim() : "",
@@ -719,9 +740,21 @@ async function readChecklist(file: File): Promise<ChecklistItem[]> {
       documentCode: codeKey ? String(r[codeKey]).trim() : "",
       documentTitle: titleKey ? String(r[titleKey]).trim() : "",
       documentVersion: versionKey ? String(r[versionKey]).trim() : "",
-    }))
+      documents,
+    }})
     .filter((x) => x.question);
 }
+const answerDocuments = (answer: Answer): DocumentReference[] =>
+  answer.documents?.length
+    ? answer.documents
+    : answer.documentType || answer.documentCode || answer.documentTitle || answer.documentVersion
+      ? [{
+          type: answer.documentType || "",
+          code: answer.documentCode || "",
+          title: answer.documentTitle || "",
+          version: answer.documentVersion || "",
+        }]
+      : [];
 function AuditForm() {
   const { id } = useParams();
   const [params] = useSearchParams();
@@ -774,6 +807,7 @@ function AuditForm() {
         documentCode: q.documentCode,
         documentTitle: q.documentTitle,
         documentVersion: q.documentVersion,
+        documents: q.documents ?? [],
         classification: null,
         finding: "",
         recommendation: "",
@@ -818,6 +852,7 @@ function AuditForm() {
         documentCode: items[index].documentCode,
         documentTitle: items[index].documentTitle,
         documentVersion: items[index].documentVersion,
+        documents: items[index].documents,
       }));
       const updated = { ...audit, answers, updatedAt: new Date().toISOString() };
       setAudit(updated);
@@ -830,6 +865,23 @@ function AuditForm() {
     } catch (e) {
       setError((e as Error).message);
     }
+  };
+  const deleteChecklist = async () => {
+    if (!audit.checklistId) return;
+    if (!confirm("Excluir este checklist cadastrado? Esta ação não pode ser desfeita.")) return;
+    await db.checklists.delete(audit.checklistId);
+    setAudit((current) => ({
+      ...current,
+      checklistId: undefined,
+      checklistName: "",
+      answers: [],
+    }));
+  };
+  const deleteScheduledAudit = async () => {
+    if (!id || audit.status !== "Programada") return;
+    if (!confirm("Excluir esta auditoria programada? Esta ação não pode ser desfeita.")) return;
+    await db.audits.delete(Number(id));
+    nav("/auditorias");
   };
   const save = async () => {
     if (!audit.unit || !audit.checklistName || !audit.startDate)
@@ -882,6 +934,12 @@ function AuditForm() {
               >
                 <Download size={16} />
                 Gerar relatório
+              </button>
+            )}
+            {id && audit.status === "Programada" && (
+              <button className="btn border border-red-300 bg-red-50 text-red-700 hover:bg-red-100" onClick={deleteScheduledAudit}>
+                <Trash2 size={16} />
+                Excluir auditoria
               </button>
             )}
             <button className="btn-primary" onClick={save}>
@@ -946,23 +1004,30 @@ function AuditForm() {
             </div>
           </div>
           {mode === "anterior" ? (
-            <select
-              className="field mt-3"
-              value={audit.checklistId ?? ""}
-              onChange={(e) => {
-                const c = checklists.find(
-                  (x) => x.id === Number(e.target.value),
-                );
-                if (c) fromChecklist(c);
-              }}
-            >
-              <option value="">Selecione um checklist</option>
-              {checklists.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <div className="mt-3 flex gap-2">
+              <select
+                className="field"
+                value={audit.checklistId ?? ""}
+                onChange={(e) => {
+                  const c = checklists.find((x) => x.id === Number(e.target.value));
+                  if (c) fromChecklist(c);
+                }}
+              >
+                <option value="">Selecione um checklist</option>
+                {checklists.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn border border-red-300 bg-red-50 px-3 text-red-700 hover:bg-red-100"
+                disabled={!audit.checklistId}
+                onClick={deleteChecklist}
+                title="Excluir checklist selecionado"
+              >
+                <Trash2 size={17} />
+              </button>
+            </div>
           ) : (
             <div className="mt-3">
               <input
@@ -1031,7 +1096,7 @@ function AuditForm() {
           </div>
           {id && audit.answers.some((answer) =>
             !answer.requirement ||
-            (!answer.documentType && !answer.documentCode && !answer.documentTitle && !answer.documentVersion),
+            answerDocuments(answer).length === 0,
           ) && (
             <div className="card border-amber-300 bg-amber-50">
               <h2 className="font-bold text-amber-900">Atualizar dados do checklist</h2>
@@ -1057,10 +1122,16 @@ function AuditForm() {
                   <div className="mt-2 text-sm font-semibold text-afpesp-700">
                     Requisito: {ans.requirement || "Não informado"}
                   </div>
-                  {(ans.documentType || ans.documentCode || ans.documentTitle || ans.documentVersion) && (
+                  {answerDocuments(ans).length > 0 && (
                     <div className="mt-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-                      <span className="font-semibold">Documento de referência:</span>{" "}
-                      {[ans.documentType, ans.documentCode, ans.documentTitle, ans.documentVersion && `Versão ${ans.documentVersion}`].filter(Boolean).join(" — ")}
+                      <div className="mb-1 font-semibold">Documentos aplicáveis:</div>
+                      <ul className="space-y-1">
+                        {answerDocuments(ans).map((document, documentIndex) => (
+                          <li key={`${document.code}-${documentIndex}`}>
+                            {documentIndex + 1}. {[document.type, document.code, document.title, document.version && `Versão ${document.version}`].filter(Boolean).join(" — ")}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
                 </div>
@@ -1182,10 +1253,9 @@ function Locations() {
   const items = useLiveQuery(() => db.units.toArray(), []) ?? [];
   const [name, setName] = useState("");
   const [type, setType] = useState<LocationType>("Unidade de Lazer");
-  const [listType, setListType] = useState<LocationType | "Todos">("Todos");
   const [search, setSearch] = useState("");
   const filteredItems = items.filter((item) =>
-    (listType === "Todos" || item.type === listType) &&
+    item.type === type &&
     (!search.trim() || normalize(item.name).includes(normalize(search))),
   );
   const add = async () => {
@@ -1201,21 +1271,12 @@ function Locations() {
         Locais
       </h2>
       <div className="mb-4 grid gap-2 sm:grid-cols-2">
-        <select className="field" value={listType} onChange={(e) => setListType(e.target.value as LocationType | "Todos")}>
-          <option>Todos</option>
+        <select className="field" value={type} onChange={(e) => setType(e.target.value as LocationType)}>
           <option>Unidade de Lazer</option>
           <option>Sede Social</option>
         </select>
         <input className="field" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filtrar local / setor" />
       </div>
-      <select
-        className="field mb-2"
-        value={type}
-        onChange={(e) => setType(e.target.value as LocationType)}
-      >
-        <option>Unidade de Lazer</option>
-        <option>Sede Social</option>
-      </select>
       <div className="mb-3 flex gap-2">
         <input
           className="field"

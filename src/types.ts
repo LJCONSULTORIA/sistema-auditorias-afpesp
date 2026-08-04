@@ -29,6 +29,13 @@ export interface ChecklistItem {
   documentCode: string;
   documentTitle: string;
   documentVersion: string;
+  documents: DocumentReference[];
+}
+export interface DocumentReference {
+  type: string;
+  code: string;
+  title: string;
+  version: string;
 }
 export interface Checklist {
   id?: number;
@@ -49,6 +56,7 @@ export interface Answer {
   documentCode: string;
   documentTitle: string;
   documentVersion: string;
+  documents: DocumentReference[];
   classification: Classification | null;
   finding: string;
   recommendation: string;

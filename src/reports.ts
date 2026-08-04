@@ -13,19 +13,27 @@ import {
 } from "docx";
 import { saveAs } from "file-saver";
 import * as XLSX from "xlsx";
-import type { Audit } from "./types";
+import type { Answer, Audit, DocumentReference } from "./types";
 const clean = (v: string) => v || "Não informado";
 const dataUrlBytes = (url: string) =>
   Uint8Array.from(atob(url.split(",")[1]), (c) => c.charCodeAt(0));
+const documentsOf = (answer: Answer): DocumentReference[] =>
+  answer.documents?.length
+    ? answer.documents
+    : answer.documentType || answer.documentCode || answer.documentTitle || answer.documentVersion
+      ? [{
+          type: answer.documentType || "",
+          code: answer.documentCode || "",
+          title: answer.documentTitle || "",
+          version: answer.documentVersion || "",
+        }]
+      : [];
 export async function exportDocx(a: Audit) {
   const documentRows = Array.from(
     new Map(
       a.answers
-        .filter((answer) => answer.documentType || answer.documentCode || answer.documentTitle || answer.documentVersion)
-        .map((answer) => [
-          [answer.documentType, answer.documentCode, answer.documentTitle, answer.documentVersion].join("|"),
-          answer,
-        ]),
+        .flatMap(documentsOf)
+        .map((document) => [[document.type, document.code, document.title, document.version].join("|"), document]),
     ).values(),
   );
   const children: (Paragraph | Table)[] = [
@@ -76,11 +84,11 @@ export async function exportDocx(a: Audit) {
         width: { size: 100, type: WidthType.PERCENTAGE },
         rows: [
           ["Tipo", "Código", "Título", "Versão"],
-          ...documentRows.map((answer) => [
-            answer.documentType || "—",
-            answer.documentCode || "—",
-            answer.documentTitle || "—",
-            answer.documentVersion || "—",
+          ...documentRows.map((document) => [
+            document.type || "—",
+            document.code || "—",
+            document.title || "—",
+            document.version || "—",
           ]),
         ].map((row, rowIndex) =>
           new TableRow({
@@ -111,23 +119,23 @@ export async function exportDocx(a: Audit) {
           new TextRun(clean(ans.requirement)),
         ],
       }),
-      ...(ans.documentType || ans.documentCode || ans.documentTitle || ans.documentVersion
+      ...(documentsOf(ans).length
         ? [
             new Paragraph({
               children: [
-                new TextRun({ text: "Documento de referência: ", bold: true }),
-                new TextRun(
-                  [
-                    ans.documentType,
-                    ans.documentCode,
-                    ans.documentTitle,
-                    ans.documentVersion && `Versão ${ans.documentVersion}`,
-                  ]
-                    .filter(Boolean)
-                    .join(" — "),
-                ),
+                new TextRun({ text: "Documentos aplicáveis:", bold: true }),
               ],
             }),
+            ...documentsOf(ans).map((document, documentIndex) =>
+              new Paragraph({
+                text: `${documentIndex + 1}. ${[
+                  document.type,
+                  document.code,
+                  document.title,
+                  document.version && `Versão ${document.version}`,
+                ].filter(Boolean).join(" — ")}`,
+              }),
+            ),
           ]
         : []),
       new Paragraph({
@@ -194,10 +202,10 @@ export function exportExcel(audits: Audit[]) {
       Questão: x.question,
       Classificação: x.classification,
       Processo: x.process,
-      "Tipo do documento": x.documentType,
-      "Código do documento": x.documentCode,
-      "Título do documento": x.documentTitle,
-      Versão: x.documentVersion,
+      "Tipo do documento": documentsOf(x).map((document) => document.type).join("\n"),
+      "Código do documento": documentsOf(x).map((document) => document.code).join("\n"),
+      "Título do documento": documentsOf(x).map((document) => document.title).join("\n"),
+      Versão: documentsOf(x).map((document) => document.version).join("\n"),
       Constatação: x.finding,
       Recomendação: x.recommendation,
     })),
