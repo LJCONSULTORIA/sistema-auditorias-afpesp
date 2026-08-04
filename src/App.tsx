@@ -526,17 +526,12 @@ function AuditHub() {
       [type],
     ) ?? [];
   const audits =
-    useLiveQuery<Audit[]>(
-      () =>
-        unit !== "Todos"
-          ? db.audits.where("unit").equals(unit).toArray()
-          : db.audits.toArray(),
-      [unit],
-    ) ?? [];
+    useLiveQuery<Audit[]>(() => db.audits.toArray(), []) ?? [];
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
     (a) =>
       (type === "Todos" || a.locationType === type) &&
+      (unit === "Todos" || normalize(a.unit).replace(/^ul\s+/, "") === normalize(unit)) &&
       (!dateFrom || a.startDate >= dateFrom) &&
       (!dateTo || a.startDate <= dateTo) &&
       (status === "Todos" || a.status === status),
@@ -805,6 +800,37 @@ function AuditForm() {
       setError((e as Error).message);
     }
   };
+  const refreshChecklistData = async (file?: File) => {
+    if (!file) return;
+    try {
+      const items = await readChecklist(file);
+      if (items.length !== audit.answers.length)
+        throw new Error(
+          `A planilha possui ${items.length} questões, mas esta auditoria possui ${audit.answers.length}. Selecione o mesmo checklist que originou a auditoria.`,
+        );
+      const answers = audit.answers.map((answer, index) => ({
+        ...answer,
+        questionId: items[index].number,
+        process: items[index].process,
+        question: items[index].question,
+        requirement: items[index].requirement,
+        documentType: items[index].documentType,
+        documentCode: items[index].documentCode,
+        documentTitle: items[index].documentTitle,
+        documentVersion: items[index].documentVersion,
+      }));
+      const updated = { ...audit, answers, updatedAt: new Date().toISOString() };
+      setAudit(updated);
+      if (id) await db.audits.put({ ...updated, id: Number(id) });
+      if (updated.checklistId) {
+        const checklist = await db.checklists.get(updated.checklistId);
+        if (checklist) await db.checklists.put({ ...checklist, items });
+      }
+      setError("");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   const save = async () => {
     if (!audit.unit || !audit.checklistName || !audit.startDate)
       return setError("Informe o local, a data e o checklist.");
@@ -1003,6 +1029,23 @@ function AuditForm() {
               />
             </Field>
           </div>
+          {id && audit.answers.some((answer) =>
+            !answer.requirement ||
+            (!answer.documentType && !answer.documentCode && !answer.documentTitle && !answer.documentVersion),
+          ) && (
+            <div className="card border-amber-300 bg-amber-50">
+              <h2 className="font-bold text-amber-900">Atualizar dados do checklist</h2>
+              <p className="my-2 text-sm text-amber-800">
+                Esta auditoria foi criada antes da importação completa dos documentos aplicáveis. Selecione o mesmo Excel para recuperar Processo, Requisito, Tipo, Código, Título e Versão, sem apagar as respostas.
+              </p>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                className="field bg-white"
+                onChange={(e) => refreshChecklistData(e.target.files?.[0])}
+              />
+            </div>
+          )}
           {audit.answers.map((ans, i) => (
             <div className="card" key={ans.id}>
               <div className="mb-5 flex gap-3">
@@ -1030,7 +1073,14 @@ function AuditForm() {
                       <button
                         type="button"
                         key={classification}
-                        className={`classification-button classification-${normalize(classification).replaceAll(" ", "-")} ${ans.classification === classification ? "selected" : ""}`}
+                        className={`classification-button ${
+                          {
+                            Conforme: "classification-conforme",
+                            "Não Conforme": "classification-nao-conforme",
+                            "Oportunidade de Melhoria": "classification-oportunidade",
+                            Risco: "classification-risco",
+                          }[classification]
+                        } ${ans.classification === classification ? "selected" : ""}`}
                         onClick={() => update(i, { classification })}
                       >
                         {classification}
@@ -1038,15 +1088,7 @@ function AuditForm() {
                     ))}
                   </div>
                 </div>
-                <Field label="Evidência fotográfica">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="field"
-                    onChange={(e) => photos(i, e.target.files)}
-                  />
-                </Field>
+                <div className="md:col-span-2">
                 <Field label="Evidência / constatação">
                   <textarea
                     className="field min-h-24"
@@ -1054,6 +1096,8 @@ function AuditForm() {
                     onChange={(e) => update(i, { finding: e.target.value })}
                   />
                 </Field>
+                </div>
+                <div className="md:col-span-2">
                 <Field label="Recomendação">
                   <textarea
                     className="field min-h-24"
@@ -1063,6 +1107,19 @@ function AuditForm() {
                     }
                   />
                 </Field>
+                </div>
+                <div className="md:col-span-2">
+                  <Field label="Fotos / evidências fotográficas">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      multiple
+                      className="field"
+                      onChange={(e) => photos(i, e.target.files)}
+                    />
+                  </Field>
+                </div>
               </div>
               {ans.photos.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-3">

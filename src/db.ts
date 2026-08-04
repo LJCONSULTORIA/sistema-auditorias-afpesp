@@ -58,6 +58,23 @@ class AuditDB extends Dexie {
           }
         });
       });
+    this.version(4)
+      .stores({
+        audits: "++id,status,locationType,unit,startDate,updatedAt",
+        units: "++id,&name,type,active",
+        auditors: "++id,&name,active",
+        questions: null,
+        checklists: "++id,name,createdAt",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("audits").toCollection().modify((audit) => {
+          const type = String(audit.locationType ?? "").toLowerCase();
+          if (type.includes("unidade") && type.includes("lazer"))
+            audit.locationType = "Unidade de Lazer";
+          else if (type.includes("sede")) audit.locationType = "Sede Social";
+          audit.unit = String(audit.unit ?? "").trim().replace(/^UL\s+/i, "");
+        });
+      });
   }
 }
 export const db = new AuditDB();
