@@ -739,6 +739,7 @@ function AuditHub() {
   const [unit, setUnit] = useState("Todos");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [auditorFilter, setAuditorFilter] = useState("Todos");
   const initialStatus = params.get("status");
   const [status, setStatus] = useState<Audit["status"] | "Todos">(
     initialStatus === "Programada" || initialStatus === "Em andamento" || initialStatus === "Finalizada"
@@ -759,6 +760,8 @@ function AuditHub() {
     ) ?? [];
   const audits =
     useLiveQuery<Audit[]>(() => db.audits.toArray(), []) ?? [];
+  const auditors =
+    useLiveQuery<Auditor[]>(() => db.auditors.filter((auditor) => auditor.active).sortBy("name"), []) ?? [];
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
     (a) =>
@@ -766,6 +769,7 @@ function AuditHub() {
       (unit === "Todos" || normalize(a.unit).replace(/^ul\s+/, "") === normalize(unit)) &&
       (!dateFrom || a.startDate >= dateFrom) &&
       (!dateTo || a.startDate <= dateTo) &&
+      (auditorFilter === "Todos" || a.auditors.includes(auditorFilter)) &&
       (status === "Todos" || a.status === status),
   );
   return (
@@ -774,7 +778,7 @@ function AuditHub() {
         title="Auditorias"
         subtitle="Consulte, abra e gerencie as auditorias pelos filtros abaixo."
       />
-      <div className="card grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-5">
+      <div className="card grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-6">
         <Field label="Tipo de local">
           <select
             className="field"
@@ -828,6 +832,12 @@ function AuditHub() {
             <option>Finalizada</option>
           </select>
         </Field>
+        <Field label="Auditor responsável">
+          <select className="field" value={auditorFilter} onChange={(e) => setAuditorFilter(e.target.value)}>
+            <option>Todos</option>
+            {auditors.map((auditor) => <option key={auditor.id}>{auditor.name}</option>)}
+          </select>
+        </Field>
       </div>
       <>
         <div className="my-5 flex justify-stretch sm:my-6 sm:justify-end">
@@ -841,7 +851,7 @@ function AuditHub() {
             }
           >
             <Plus size={16} />
-            Importar novo checklist
+            Nova auditoria
           </button>
         </div>
         <AuditManagement
@@ -860,6 +870,17 @@ function AuditManagement({
   onOpen: (id: number) => void;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [rescheduleId, setRescheduleId] = useState<number | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const confirmReschedule = async (audit: Audit) => {
+    if (!audit.id || !rescheduleDate) return;
+    await db.audits.update(audit.id, {
+      startDate: rescheduleDate,
+      updatedAt: new Date().toISOString(),
+    });
+    setRescheduleId(null);
+    setRescheduleDate("");
+  };
   return (
     <section className="card p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -923,6 +944,19 @@ function AuditManagement({
               {a.status === "Programada" && (
                 <button
                   type="button"
+                  className="btn-secondary w-full sm:w-auto"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setRescheduleId(a.id!);
+                    setRescheduleDate(a.startDate);
+                  }}
+                >
+                  Reprogramar
+                </button>
+              )}
+              {a.status === "Programada" && (
+                <button
+                  type="button"
                   className="btn w-full bg-red-50 text-red-700 hover:bg-red-100 sm:w-auto"
                   onClick={(event) => {
                     event.stopPropagation();
@@ -933,6 +967,15 @@ function AuditManagement({
                 </button>
               )}
               </div>
+              {rescheduleId === a.id && (
+                <div className="mt-3 flex flex-col gap-2 rounded-lg border border-afpesp-100 bg-white p-3 sm:flex-row sm:items-end">
+                  <Field label="Nova data da auditoria">
+                    <input type="date" className="field" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
+                  </Field>
+                  <button className="btn-primary" disabled={!rescheduleDate} onClick={() => confirmReschedule(a)}>Confirmar nova data</button>
+                  <button className="btn-secondary" onClick={() => { setRescheduleId(null); setRescheduleDate(""); }}>Cancelar</button>
+                </div>
+              )}
             </div>
             )}
           </article>
@@ -1018,6 +1061,8 @@ function AuditForm() {
     ) ?? [];
   const registeredDocuments =
     useLiveQuery(() => db.documents.filter((document) => document.active).toArray(), []) ?? [];
+  const availableAuditors =
+    useLiveQuery(() => db.auditors.filter((auditor) => auditor.active).sortBy("name"), []) ?? [];
   const [mode, setMode] = useState<"anterior" | "novo">(
     params.get("mode") === "novo" ? "novo" : "anterior",
   );
@@ -1026,7 +1071,7 @@ function AuditForm() {
     locationType,
     unit: selectedUnit,
     checklistName: "",
-    auditors: auditorAtual ? [auditorAtual] : [],
+    auditors: [],
     startDate: today(),
     endDate: "",
     scope: "",
@@ -1109,8 +1154,8 @@ function AuditForm() {
     nav("/auditorias");
   };
   const save = async () => {
-    if (!audit.unit || !audit.checklistName || !audit.startDate)
-      return setError("Informe o local, a data e o checklist.");
+    if (!audit.auditors.length || !audit.auditors[0] || !audit.unit || !audit.checklistName || !audit.startDate)
+      return setError("Informe o auditor responsável, o local, a data e o checklist.");
     const data = { ...audit, updatedAt: new Date().toISOString() };
     const saved = id
       ? (await db.audits.put({ ...data, id: Number(id) }), Number(id))
@@ -1217,6 +1262,16 @@ function AuditForm() {
       {!id && (
         <div className="card">
           <div className="grid gap-4">
+            <Field label="Auditor responsável">
+              <select
+                className="field"
+                value={audit.auditors[0] || ""}
+                onChange={(e) => setAudit({ ...audit, auditors: e.target.value ? [e.target.value] : [] })}
+              >
+                <option value="">Selecione o auditor</option>
+                {availableAuditors.map((auditor) => <option key={auditor.id}>{auditor.name}</option>)}
+              </select>
+            </Field>
             <Field label="Data da auditoria">
               <input
                 type="date"
