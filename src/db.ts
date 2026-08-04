@@ -1,5 +1,54 @@
-import Dexie,{type Table} from 'dexie';
-import type {Audit,Auditor,Question,Unit} from './types';
-class AuditDB extends Dexie {audits!:Table<Audit,number>;units!:Table<Unit,number>;auditors!:Table<Auditor,number>;questions!:Table<Question,number>;constructor(){super('AFPESP_Auditorias');this.version(1).stores({audits:'++id,status,unit,startDate,updatedAt',units:'++id,&name,active',auditors:'++id,&name,active',questions:'++id,requirement,active'});}}
-export const db=new AuditDB();
-export async function seed(){if(await db.units.count()===0)await db.units.bulkAdd([{name:'Sede Social',active:true},{name:'UL Campos do Jordão',active:true},{name:'UL Guarujá',active:true},{name:'UL Socorro',active:true}]);if(await db.questions.count()===0)await db.questions.bulkAdd([{requirement:'4.4',text:'Os processos do SGQ estão determinados, implementados e mantidos?',active:true},{requirement:'5.1',text:'A liderança demonstra comprometimento com o SGQ?',active:true},{requirement:'6.1',text:'Riscos e oportunidades são determinados e tratados?',active:true},{requirement:'7.2',text:'As competências necessárias estão determinadas e evidenciadas?',active:true},{requirement:'7.5',text:'A informação documentada está controlada?',active:true},{requirement:'8.1',text:'Os processos operacionais são planejados e controlados?',active:true},{requirement:'8.4',text:'Fornecedores externos são avaliados e monitorados?',active:true},{requirement:'9.1',text:'O desempenho dos processos é monitorado e analisado?',active:true},{requirement:'10.2',text:'Não conformidades são tratadas e ações corretivas avaliadas?',active:true}]);}
+import Dexie, { type Table } from "dexie";
+import type { Audit, Auditor, Checklist, Question, Unit } from "./types";
+class AuditDB extends Dexie {
+  audits!: Table<Audit, number>;
+  units!: Table<Unit, number>;
+  auditors!: Table<Auditor, number>;
+  questions!: Table<Question, number>;
+  checklists!: Table<Checklist, number>;
+  constructor() {
+    super("AFPESP_Auditorias");
+    this.version(1).stores({
+      audits: "++id,status,unit,startDate,updatedAt",
+      units: "++id,&name,active",
+      auditors: "++id,&name,active",
+      questions: "++id,requirement,active",
+    });
+    this.version(2)
+      .stores({
+        audits: "++id,status,locationType,unit,startDate,updatedAt",
+        units: "++id,&name,type,active",
+        auditors: "++id,&name,active",
+        questions: null,
+        checklists: "++id,name,createdAt",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("units")
+          .toCollection()
+          .modify((u) => {
+            u.type =
+              u.name === "Sede Social" ? "Sede Social" : "Unidade de Lazer";
+          });
+        await tx
+          .table("audits")
+          .toCollection()
+          .modify((a) => {
+            a.locationType =
+              a.unit === "Sede Social" ? "Sede Social" : "Unidade de Lazer";
+            a.checklistName = "Checklist anterior";
+            if (a.status === "Concluída") a.status = "Finalizada";
+          });
+      });
+  }
+}
+export const db = new AuditDB();
+export async function seed() {
+  if ((await db.units.count()) === 0)
+    await db.units.bulkAdd([
+      { name: "Campos do Jordão", type: "Unidade de Lazer", active: true },
+      { name: "Guarujá", type: "Unidade de Lazer", active: true },
+      { name: "Socorro", type: "Unidade de Lazer", active: true },
+      { name: "Sede Social", type: "Sede Social", active: true },
+    ]);
+}
