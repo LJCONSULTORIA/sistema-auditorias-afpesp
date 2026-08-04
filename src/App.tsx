@@ -954,13 +954,14 @@ function AuditManagement({
                   Reprogramar
                 </button>
               )}
-              {a.status === "Programada" && (
+              {a.status !== "Finalizada" && (
                 <button
                   type="button"
                   className="btn w-full bg-red-50 text-red-700 hover:bg-red-100 sm:w-auto"
                   onClick={(event) => {
                     event.stopPropagation();
-                    if (confirm("Excluir esta auditoria programada?")) db.audits.delete(a.id!);
+                    if (confirm(`Excluir esta auditoria ${a.status.toLowerCase()}? Esta ação não pode ser desfeita.`))
+                      db.audits.delete(a.id!);
                   }}
                 >
                   <Trash2 size={16} /> Excluir
@@ -1147,9 +1148,9 @@ function AuditForm() {
       answers: [],
     }));
   };
-  const deleteScheduledAudit = async () => {
-    if (!id || audit.status !== "Programada") return;
-    if (!confirm("Excluir esta auditoria programada? Esta ação não pode ser desfeita.")) return;
+  const deleteEditableAudit = async () => {
+    if (!id || audit.status === "Finalizada") return;
+    if (!confirm(`Excluir esta auditoria ${audit.status.toLowerCase()}? Esta ação não pode ser desfeita.`)) return;
     await db.audits.delete(Number(id));
     nav("/auditorias");
   };
@@ -1232,8 +1233,8 @@ function AuditForm() {
                 Gerar relatório
               </button>
             )}
-            {id && audit.status === "Programada" && (
-              <button className="btn border border-red-300 bg-red-50 text-red-700 hover:bg-red-100" onClick={deleteScheduledAudit}>
+            {id && audit.status !== "Finalizada" && (
+              <button className="btn border border-red-300 bg-red-50 text-red-700 hover:bg-red-100" onClick={deleteEditableAudit}>
                 <Trash2 size={16} />
                 Excluir auditoria
               </button>
