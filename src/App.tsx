@@ -628,22 +628,6 @@ function ResultAnalysis({
               })}
             </div>
           </div>
-          <div className="rounded-xl border border-slate-200 p-4 lg:col-span-2">
-            <h3 className="font-bold text-slate-800">Todos os registros</h3>
-            <p className="mb-3 text-sm text-slate-500">Questões classificadas como {classification}.</p>
-            <div className="max-h-96 space-y-3 overflow-y-auto">
-              {records.map(({ audit, answer }, index) => (
-                <article key={`${audit.id}-${answer.id}-${index}`} className="rounded-lg border border-slate-200 p-3">
-                  <div className="flex flex-wrap justify-between gap-2">
-                    <span className="font-bold text-afpesp-800">{audit.locationType} — {audit.unit}</span>
-                    <span className="text-sm text-slate-500">{formatDate(audit.startDate)}</span>
-                  </div>
-                  <p className="mt-2 break-words text-sm text-slate-700">{answer.question}</p>
-                  <p className="mt-2 text-xs font-semibold text-slate-500">Requisito: {answer.requirement || "Não informado"}</p>
-                </article>
-              ))}
-            </div>
-          </div>
         </div>
       ) : (
         <p className="mt-5 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">Nenhum registro desta classificação no filtro selecionado.</p>
@@ -862,7 +846,6 @@ function AuditHub() {
         </div>
         <AuditManagement
           audits={[...filtered].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))}
-          status={status}
           onOpen={(id) => nav(`/auditorias/${id}`)}
         />
       </>
@@ -871,54 +854,49 @@ function AuditHub() {
 }
 function AuditManagement({
   audits,
-  status,
   onOpen,
 }: {
   audits: Audit[];
-  status: Audit["status"] | "Todos";
   onOpen: (id: number) => void;
 }) {
-  const title = status === "Todos"
-    ? "Todas as auditorias"
-    : status === "Em andamento"
-      ? "Auditorias em andamento"
-      : status === "Finalizada"
-        ? "Auditorias finalizadas"
-        : "Auditorias programadas";
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   return (
     <section className="card p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-afpesp-800">{title}</h2>
-          <p className="text-sm text-slate-500">Clique no card ou utilize o botão para abrir.</p>
+          <h2 className="text-lg font-bold text-afpesp-800">Listagem de auditorias</h2>
+          <p className="text-sm text-slate-500">Selecione uma auditoria para consultar as opções.</p>
         </div>
         <span className="rounded-full bg-afpesp-50 px-3 py-1 text-sm font-bold text-afpesp-700">{audits.length}</span>
       </div>
       {audits.length ? (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
         {audits.map((a) => (
-          <article
-            key={a.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpen(a.id!)}
-            onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && onOpen(a.id!)}
-            className="min-w-0 cursor-pointer rounded-xl border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300"
-          >
-            <div className="flex items-start justify-between gap-3">
+          <article key={a.id} className="bg-white">
+            <button
+              type="button"
+              className="grid w-full min-w-0 gap-2 p-3 text-left transition hover:bg-slate-50 sm:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4 sm:p-4"
+              onClick={() => setExpandedId(expandedId === a.id ? null : a.id!)}
+              aria-expanded={expandedId === a.id}
+            >
               <div className="min-w-0">
                 <div className="break-words font-bold text-afpesp-800">{a.locationType} — {a.unit}</div>
-                <div className="mt-1 break-words text-sm text-slate-500">{a.checklistName || "Checklist não identificado"}</div>
+                <div className="truncate text-sm text-slate-500">{a.checklistName || "Checklist não identificado"}</div>
               </div>
-              <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-afpesp-50 text-afpesp-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
+              <div className="text-sm text-slate-600"><span className="sm:hidden">Auditor: </span>{a.auditors.join(", ") || "Não identificado"}</div>
+              <div className="text-sm font-semibold text-slate-700">{formatDate(a.startDate)}</div>
+              <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-afpesp-50 text-afpesp-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
                 {a.status}
               </span>
-            </div>
-            <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-sm">
-              <div><dt className="text-xs font-semibold uppercase text-slate-400">Data</dt><dd className="mt-1 font-semibold text-slate-700">{formatDate(a.startDate)}</dd></div>
-              <div><dt className="text-xs font-semibold uppercase text-slate-400">Auditor</dt><dd className="mt-1 break-words text-slate-700">{a.auditors.join(", ") || "Não identificado"}</dd></div>
-            </dl>
-            <div className="mt-4 grid gap-2 sm:flex sm:flex-wrap">
+            </button>
+            {expandedId === a.id && (
+            <div className="border-t border-slate-100 bg-slate-50/70 p-3 sm:p-4">
+              <div className="mb-3 grid gap-2 text-sm sm:grid-cols-3">
+                <div><span className="font-semibold text-slate-500">Local:</span> {a.unit}</div>
+                <div><span className="font-semibold text-slate-500">Auditor:</span> {a.auditors.join(", ") || "Não identificado"}</div>
+                <div><span className="font-semibold text-slate-500">Situação:</span> {a.status}</div>
+              </div>
+              <div className="grid gap-2 sm:flex sm:flex-wrap">
               <button
                 type="button"
                 className="btn-primary w-full sm:w-auto"
@@ -954,7 +932,9 @@ function AuditManagement({
                   <Trash2 size={16} /> Excluir
                 </button>
               )}
+              </div>
             </div>
+            )}
           </article>
         ))}
         </div>
