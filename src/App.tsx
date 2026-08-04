@@ -103,13 +103,13 @@ function Layout({
             <div className="font-bold">AFPESP</div>
             <div className="text-xs text-afpesp-100">Auditorias Internas</div>
           </div>
-          <div className="ml-auto flex items-center gap-4 text-sm">
-            <span className="font-semibold">{user}</span>
+          <div className="ml-auto flex min-w-0 items-center gap-2 text-sm sm:gap-4">
+            <span className="max-w-28 truncate font-semibold sm:max-w-none">{user}</span>
             <button
-              className="btn border border-white/30 bg-white/10 text-white hover:bg-white/20"
+              className="btn border border-white/30 bg-white/10 px-3 text-white hover:bg-white/20"
               onClick={onLogout}
             >
-              <LogOut size={16} /> Encerrar sessão
+              <LogOut size={16} /> <span className="hidden sm:inline">Encerrar sessão</span>
             </button>
           </div>
         </div>
@@ -545,19 +545,7 @@ function AuditHub() {
   const audits =
     useLiveQuery<Audit[]>(() => db.audits.toArray(), []) ?? [];
   const checklists =
-    useLiveQuery<Checklist[]>(
-      () =>
-        type !== "Todos" && unit !== "Todos"
-          ? db.checklists
-              .filter(
-                (checklist) =>
-                  checklist.locationType === type &&
-                  normalize(checklist.unit).replace(/^ul\s+/, "") === normalize(unit),
-              )
-              .sortBy("createdAt")
-          : Promise.resolve([]),
-      [type, unit],
-    ) ?? [];
+    useLiveQuery<Checklist[]>(() => db.checklists.orderBy("createdAt").toArray(), []) ?? [];
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
     (a) =>
@@ -566,6 +554,12 @@ function AuditHub() {
       (!dateFrom || a.startDate >= dateFrom) &&
       (!dateTo || a.startDate <= dateTo) &&
       (status === "Todos" || a.status === status),
+  );
+  const filteredChecklists = checklists.filter(
+    (checklist) =>
+      (type === "Todos" || checklist.locationType === type) &&
+      (unit === "Todos" ||
+        normalize(checklist.unit).replace(/^ul\s+/, "") === normalize(unit)),
   );
   return (
     <>
@@ -584,7 +578,7 @@ function AuditHub() {
           ) : undefined
         }
       />
-      <div className="card grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="card grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-5">
         <Field label="Tipo de local">
           <select
             className="field"
@@ -640,9 +634,9 @@ function AuditHub() {
         </Field>
       </div>
       <>
-        <div className="my-6 flex justify-end">
+        <div className="my-5 flex justify-stretch sm:my-6 sm:justify-end">
           <button
-            className="btn-primary"
+            className="btn-primary w-full sm:w-auto"
             disabled={type === "Todos" || unit === "Todos"}
             onClick={() =>
               nav(
@@ -654,22 +648,17 @@ function AuditHub() {
             Importar novo checklist
           </button>
         </div>
-        {type !== "Todos" && unit !== "Todos" && (
-          <ChecklistManagement
-            checklists={[...checklists].reverse()}
-            audits={audits.filter(
-              (audit) =>
-                audit.locationType === type &&
-                normalize(audit.unit).replace(/^ul\s+/, "") === normalize(unit),
-            )}
-            onOpen={(auditId) => nav(`/auditorias/${auditId}`)}
-            onStart={(checklistId) =>
-              nav(
-                `/auditorias/nova?type=${encodeURIComponent(type)}&unit=${encodeURIComponent(unit)}&checklistId=${checklistId}`,
-              )
-            }
-          />
-        )}
+        <ChecklistManagement
+          checklists={[...filteredChecklists].reverse()}
+          audits={audits}
+          filtered={type !== "Todos" || unit !== "Todos"}
+          onOpen={(auditId) => nav(`/auditorias/${auditId}`)}
+          onStart={(checklist) =>
+            nav(
+              `/auditorias/nova?type=${encodeURIComponent(checklist.locationType)}&unit=${encodeURIComponent(checklist.unit)}&checklistId=${checklist.id}`,
+            )
+          }
+        />
         <div className="grid gap-5 lg:grid-cols-3">
           {(["Programada", "Em andamento", "Finalizada"] as const).map(
             (status) => (
@@ -689,19 +678,30 @@ function AuditHub() {
 function ChecklistManagement({
   checklists,
   audits,
+  filtered,
   onOpen,
   onStart,
 }: {
   checklists: Checklist[];
   audits: Audit[];
+  filtered: boolean;
   onOpen: (auditId: number) => void;
-  onStart: (checklistId: number) => void;
+  onStart: (checklist: Checklist) => void;
 }) {
   return (
-    <section className="card mb-6">
-      <h2 className="text-2xl font-bold text-afpesp-700">Checklists cadastrados</h2>
-      <p className="mb-5 mt-1 text-sm text-slate-500">Modelos disponíveis para o tipo de local e local selecionados.</p>
-      <div className="space-y-3">
+    <section className="card mb-6 p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-bold text-afpesp-700 sm:text-2xl">Checklists cadastrados</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {filtered ? "Modelos correspondentes aos filtros selecionados." : "Todos os modelos cadastrados neste navegador."}
+          </p>
+        </div>
+        <span className="rounded-full bg-afpesp-50 px-3 py-1 text-sm font-bold text-afpesp-700">
+          {checklists.length}
+        </span>
+      </div>
+      <div className="mt-5 space-y-3">
         {checklists.length ? checklists.map((checklist) => {
           const uses = audits.filter((audit) => audit.checklistId === checklist.id);
           const activeAudit =
@@ -716,25 +716,34 @@ function ChecklistManagement({
             status === "Em andamento" ? "text-amber-700" :
             status === "Programada" ? "text-blue-700" : "text-slate-600";
           return (
-            <article key={checklist.id} className="rounded-xl border border-slate-200 bg-slate-50/40 p-4">
-              <h3 className="text-lg font-bold text-afpesp-800">{checklist.fileName || checklist.name}</h3>
-              <p className="mt-1 text-sm text-slate-600">
-                {checklist.locationType} • {checklist.unit} • {checklist.items.length} questões • Cadastrado em {new Date(checklist.createdAt).toLocaleString("pt-BR")}
-              </p>
-              <p className="mt-3 text-sm text-slate-600">Utilizado em {uses.length} auditoria(s).</p>
-              <div className={`mt-3 font-bold uppercase ${statusClass}`}>{status}</div>
-              <div className="mt-3 flex flex-wrap gap-2">
+            <article key={checklist.id} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40">
+              <div className="p-4">
+                <h3 className="break-words text-base font-bold leading-snug text-afpesp-800 sm:text-lg">
+                  {checklist.fileName || checklist.name}
+                </h3>
+                <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Tipo</dt><dd className="mt-0.5 text-slate-700">{checklist.locationType}</dd></div>
+                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Local / Setor</dt><dd className="mt-0.5 text-slate-700">{checklist.unit}</dd></div>
+                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Questões</dt><dd className="mt-0.5 text-slate-700">{checklist.items.length}</dd></div>
+                  <div><dt className="text-xs font-semibold uppercase text-slate-400">Cadastro</dt><dd className="mt-0.5 text-slate-700">{new Date(checklist.createdAt).toLocaleString("pt-BR")}</dd></div>
+                </dl>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+                  <span className="text-sm text-slate-600">Utilizado em {uses.length} auditoria(s)</span>
+                  <span className={`text-sm font-bold uppercase ${statusClass}`}>{status}</span>
+                </div>
+              </div>
+              <div className="grid gap-2 border-t border-slate-200 bg-white p-3 sm:flex sm:flex-wrap">
                 <button
-                  className="btn bg-blue-700 text-white hover:bg-blue-800"
-                  onClick={() => activeAudit?.id ? onOpen(activeAudit.id) : onStart(checklist.id!)}
+                  className="btn w-full bg-blue-700 text-white hover:bg-blue-800 sm:w-auto"
+                  onClick={() => activeAudit?.id ? onOpen(activeAudit.id) : onStart(checklist)}
                 >
                   {activeAudit?.status === "Em andamento" ? "Continuar auditoria" : "Iniciar auditoria"}
                 </button>
                 {protectedChecklist ? (
-                  <button className="btn bg-slate-300 text-white" disabled>Protegido</button>
+                  <button className="btn w-full bg-slate-300 text-white sm:w-auto" disabled>Protegido</button>
                 ) : (
                   <button
-                    className="btn bg-red-600 text-white hover:bg-red-700"
+                    className="btn w-full bg-red-600 text-white hover:bg-red-700 sm:w-auto"
                     onClick={() => confirm("Excluir este checklist cadastrado? Esta ação não pode ser desfeita.") && db.checklists.delete(checklist.id!)}
                   >
                     Excluir
@@ -744,7 +753,9 @@ function ChecklistManagement({
             </article>
           );
         }) : (
-          <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">Nenhum checklist cadastrado para este local.</p>
+          <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+            {filtered ? "Nenhum checklist corresponde aos filtros selecionados." : "Nenhum checklist cadastrado neste navegador."}
+          </p>
         )}
       </div>
     </section>
@@ -760,8 +771,9 @@ function AuditColumn({
   onOpen: (id: number) => void;
 }) {
   return (
-    <div className="card">
-      <h2 className="mb-3 font-bold">
+    <div className="card p-4 sm:p-5">
+      <div className="mb-3 flex items-center justify-between gap-2">
+      <h2 className="font-bold">
         {
           {
             Programada: "Programadas",
@@ -770,6 +782,8 @@ function AuditColumn({
           }[status]
         }
       </h2>
+      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{audits.length}</span>
+      </div>
       {audits.length ? (
         audits.map((a) => (
           <button
