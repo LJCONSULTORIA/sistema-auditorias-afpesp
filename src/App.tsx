@@ -16,9 +16,11 @@ import {
   Download,
   FileDown,
   LogOut,
+  Monitor,
   Plus,
   Save,
   Settings,
+  Smartphone,
   Trash2,
   Users,
   X,
@@ -96,17 +98,21 @@ const documentTypes = [
   "Norma",
 ] as const;
 const today = () => new Date().toISOString().slice(0, 10);
+type LayoutMode = "web" | "mobile";
 const sessionKey = "AFPESP_AUDITOR_ATUAL";
+const layoutModeKey = "AFPESP_LAYOUT_MODE";
 const loggedAuditor = () => localStorage.getItem(sessionKey) || "";
 const formatDate = (value: string) =>
   value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "—";
 function Layout({
   children,
   user,
+  mode,
   onLogout,
 }: {
   children: React.ReactNode;
   user: string;
+  mode: LayoutMode;
   onLogout: () => void;
 }) {
   const links = [
@@ -117,7 +123,7 @@ function Layout({
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b bg-afpesp-700 text-white">
-        <div className="mx-auto flex h-14 max-w-7xl items-center px-3 sm:h-16 sm:px-4">
+        <div className={`mx-auto flex h-14 items-center px-3 sm:h-16 sm:px-4 ${mode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
           <div>
             <div className="font-bold">AFPESP</div>
             <div className="hidden text-xs text-afpesp-100 min-[380px]:block">Auditorias Internas</div>
@@ -133,8 +139,8 @@ function Layout({
           </div>
         </div>
       </header>
-      <div className="mx-auto flex max-w-7xl">
-        <aside className="hidden min-h-[calc(100vh-4rem)] w-64 shrink-0 border-r bg-white p-4 md:block">
+      <div className={`mx-auto flex ${mode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
+        <aside className={`${mode === "mobile" ? "hidden" : "hidden md:block"} min-h-[calc(100vh-4rem)] w-64 shrink-0 border-r bg-white p-4`}>
           {links.map(([Icon, to, label]) => (
             <NavLink
               key={to}
@@ -150,7 +156,7 @@ function Layout({
         </aside>
         <main className="min-w-0 flex-1 px-3 pb-24 pt-4 sm:px-4 md:p-8">{children}</main>
       </div>
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-slate-200 bg-white/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-4px_16px_rgba(15,23,42,.08)] backdrop-blur md:hidden">
+      <nav className={`fixed inset-x-0 bottom-0 z-40 grid-cols-3 border-t border-slate-200 bg-white/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-4px_16px_rgba(15,23,42,.08)] backdrop-blur ${mode === "mobile" ? "grid" : "grid md:hidden"}`}>
         {links.map(([Icon, to, label]) => (
           <NavLink
             key={to}
@@ -167,12 +173,13 @@ function Layout({
     </div>
   );
 }
-function Login({ onLogin }: { onLogin: (name: string) => void }) {
+function Login({ onLogin }: { onLogin: (name: string, mode: LayoutMode) => void }) {
   const auditors =
     useLiveQuery(() => db.auditors.filter((auditor) => auditor.active).toArray(), []) ??
     [];
   const [selected, setSelected] = useState("");
   const [newName, setNewName] = useState("");
+  const [layoutMode, setLayoutMode] = useState<LayoutMode | "">("");
   const enter = async () => {
     let name = selected;
     if (!name && newName.trim()) {
@@ -180,7 +187,7 @@ function Login({ onLogin }: { onLogin: (name: string) => void }) {
       if (!(await db.auditors.where("name").equals(name).count()))
         await db.auditors.add({ name, role: "Auditor", active: true });
     }
-    if (name) onLogin(name);
+    if (name && layoutMode) onLogin(name, layoutMode);
   };
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
@@ -191,6 +198,25 @@ function Login({ onLogin }: { onLogin: (name: string) => void }) {
           </h1>
           <p className="mt-2 text-slate-500">Auditorias Internas AFPESP</p>
         </div>
+        <Field label="Como deseja utilizar o sistema?">
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              className={`flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border p-3 text-sm font-bold transition ${layoutMode === "web" ? "border-afpesp-500 bg-afpesp-50 text-afpesp-800 ring-2 ring-afpesp-100" : "border-slate-200 bg-white text-slate-600 hover:border-afpesp-300"}`}
+              onClick={() => setLayoutMode("web")}
+            >
+              <Monitor size={26} /> Versão Web
+            </button>
+            <button
+              type="button"
+              className={`flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border p-3 text-sm font-bold transition ${layoutMode === "mobile" ? "border-afpesp-500 bg-afpesp-50 text-afpesp-800 ring-2 ring-afpesp-100" : "border-slate-200 bg-white text-slate-600 hover:border-afpesp-300"}`}
+              onClick={() => setLayoutMode("mobile")}
+            >
+              <Smartphone size={26} /> Versão Celular
+            </button>
+          </div>
+        </Field>
+        <div className="my-5 border-t border-slate-200" />
         {auditors.length > 0 && (
           <Field label="Auditor cadastrado">
             <select
@@ -225,7 +251,7 @@ function Login({ onLogin }: { onLogin: (name: string) => void }) {
         </Field>
         <button
           className="btn-primary mt-5 w-full"
-          disabled={!selected && !newName.trim()}
+          disabled={!layoutMode || (!selected && !newName.trim())}
           onClick={enter}
         >
           Acessar sistema
@@ -1791,20 +1817,27 @@ function DocumentsRegistry() {
 }
 export default function App() {
   const [user, setUser] = useState(loggedAuditor());
+  const [layoutMode, setLayoutMode] = useState<LayoutMode | "">(
+    () => (localStorage.getItem(layoutModeKey) as LayoutMode | null) ?? "",
+  );
   useEffect(() => {
     seed();
   }, []);
-  const login = (name: string) => {
+  const login = (name: string, mode: LayoutMode) => {
     localStorage.setItem(sessionKey, name);
+    localStorage.setItem(layoutModeKey, mode);
     setUser(name);
+    setLayoutMode(mode);
   };
   const logout = () => {
     localStorage.removeItem(sessionKey);
+    localStorage.removeItem(layoutModeKey);
     setUser("");
+    setLayoutMode("");
   };
-  if (!user) return <Login onLogin={login} />;
+  if (!user || !layoutMode) return <Login onLogin={login} />;
   return (
-    <Layout user={user} onLogout={logout}>
+    <Layout user={user} mode={layoutMode} onLogout={logout}>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/auditorias" element={<AuditHub />} />
