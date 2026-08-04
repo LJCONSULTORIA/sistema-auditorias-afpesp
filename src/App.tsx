@@ -16,7 +16,6 @@ import {
   Download,
   FileDown,
   LogOut,
-  Menu,
   Plus,
   Save,
   Settings,
@@ -110,7 +109,6 @@ function Layout({
   user: string;
   onLogout: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const links = [
     [BarChart3, "/", "Dashboard"],
     [ClipboardCheck, "/auditorias", "Auditorias"],
@@ -119,13 +117,10 @@ function Layout({
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b bg-afpesp-700 text-white">
-        <div className="mx-auto flex h-16 max-w-7xl items-center px-4">
-          <button className="mr-3 md:hidden" onClick={() => setOpen(!open)}>
-            <Menu />
-          </button>
+        <div className="mx-auto flex h-14 max-w-7xl items-center px-3 sm:h-16 sm:px-4">
           <div>
             <div className="font-bold">AFPESP</div>
-            <div className="text-xs text-afpesp-100">Auditorias Internas</div>
+            <div className="hidden text-xs text-afpesp-100 min-[380px]:block">Auditorias Internas</div>
           </div>
           <div className="ml-auto flex min-w-0 items-center gap-2 text-sm sm:gap-4">
             <span className="max-w-28 truncate font-semibold sm:max-w-none">{user}</span>
@@ -139,14 +134,11 @@ function Layout({
         </div>
       </header>
       <div className="mx-auto flex max-w-7xl">
-        <aside
-          className={`${open ? "block" : "hidden"} fixed inset-y-16 z-20 w-64 border-r bg-white p-4 md:static md:block md:min-h-[calc(100vh-4rem)]`}
-        >
+        <aside className="hidden min-h-[calc(100vh-4rem)] w-64 shrink-0 border-r bg-white p-4 md:block">
           {links.map(([Icon, to, label]) => (
             <NavLink
               key={to}
               to={to}
-              onClick={() => setOpen(false)}
               className={({ isActive }) =>
                 `mb-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium ${isActive ? "bg-afpesp-50 text-afpesp-700" : "text-slate-600 hover:bg-slate-100"}`
               }
@@ -156,8 +148,22 @@ function Layout({
             </NavLink>
           ))}
         </aside>
-        <main className="min-w-0 flex-1 p-4 md:p-8">{children}</main>
+        <main className="min-w-0 flex-1 px-3 pb-24 pt-4 sm:px-4 md:p-8">{children}</main>
       </div>
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-slate-200 bg-white/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-4px_16px_rgba(15,23,42,.08)] backdrop-blur md:hidden">
+        {links.map(([Icon, to, label]) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              `flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-semibold ${isActive ? "bg-afpesp-50 text-afpesp-700" : "text-slate-500"}`
+            }
+          >
+            <Icon size={20} />
+            {label}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }
@@ -178,9 +184,9 @@ function Login({ onLogin }: { onLogin: (name: string) => void }) {
   };
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
-      <div className="card w-full max-w-md p-8">
+      <div className="card w-full max-w-md p-5 sm:p-8">
         <div className="mb-6 text-center">
-          <h1 className="text-3xl font-bold text-afpesp-700">
+          <h1 className="text-2xl font-bold text-afpesp-700 sm:text-3xl">
             Sistema de Auditorias
           </h1>
           <p className="mt-2 text-slate-500">Auditorias Internas AFPESP</p>
@@ -241,12 +247,12 @@ function PageTitle({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-5 flex flex-wrap items-start justify-between gap-3 sm:mb-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
+        <h1 className="break-words text-xl font-bold leading-tight text-slate-900 sm:text-2xl">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
       </div>
-      {action}
+      {action && <div className="w-full sm:w-auto">{action}</div>}
     </div>
   );
 }
@@ -279,12 +285,12 @@ function Stat({
     <button
       type="button"
       onClick={onClick}
-      className={`card flex min-h-36 w-full flex-col items-center justify-center gap-3 p-4 text-center transition hover:-translate-y-0.5 hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300 ${active ? "border-afpesp-500 bg-afpesp-50 ring-2 ring-afpesp-100" : ""}`}
+      className={`card flex min-h-28 w-full flex-col items-center justify-center gap-2 p-3 text-center transition hover:-translate-y-0.5 hover:border-afpesp-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-afpesp-300 sm:min-h-36 sm:gap-3 sm:p-4 ${active ? "border-afpesp-500 bg-afpesp-50 ring-2 ring-afpesp-100" : ""}`}
     >
       {content}
     </button>
   ) : (
-    <div className="card flex min-h-36 flex-col items-center justify-center gap-3 p-4 text-center">{content}</div>
+    <div className="card flex min-h-28 flex-col items-center justify-center gap-2 p-3 text-center sm:min-h-36 sm:gap-3 sm:p-4">{content}</div>
   );
 }
 function HomePage() {
@@ -394,7 +400,7 @@ function HomePage() {
         </Field>
       </div>
       <h2 className="mb-3 text-lg font-bold text-slate-800">Visão geral</h2>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
         <Stat
           title="Total de auditorias"
           value={String(filtered.length)}
@@ -435,7 +441,7 @@ function HomePage() {
         />
       </div>
       <h2 className="mb-3 mt-6 text-lg font-bold text-slate-800">Resultados registrados</h2>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
           title="Conformidades"
           value={String(counts[0])}
@@ -1217,7 +1223,7 @@ function AuditForm() {
           id ? audit.checklistName : `${audit.locationType} — ${audit.unit}`
         }
         action={
-          <div className="flex gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
             <button
               className="btn-secondary"
               onClick={() => nav("/auditorias")}
@@ -1289,7 +1295,7 @@ function AuditForm() {
           </div>
           <div className="mt-5">
             <span className="label">Checklist</span>
-            <div className="flex gap-4">
+            <div className="grid gap-2 text-sm sm:flex sm:gap-4">
               <label>
                 <input
                   type="radio"
@@ -1309,7 +1315,7 @@ function AuditForm() {
             </div>
           </div>
           {mode === "anterior" ? (
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 flex min-w-0 gap-2">
               <select
                 className="field"
                 value={audit.checklistId ?? ""}
@@ -1364,7 +1370,7 @@ function AuditForm() {
       )}
       {id && (
         <div className="mt-6 space-y-6">
-          <div className="card grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="card grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div><span className="label">Auditor responsável</span><div className="font-semibold">{audit.auditors.join(", ") || auditorAtual}</div></div>
             <div><span className="label">Status</span><div className="font-semibold text-afpesp-700">{audit.status}</div></div>
             <div><span className="label">Data programada</span><div className="font-semibold">{formatDate(audit.startDate)}</div></div>
@@ -1378,13 +1384,13 @@ function AuditForm() {
           {audit.status !== "Programada" && (
           <>
           {audit.answers.map((ans, i) => (
-            <div className="card" key={ans.id}>
+            <div className="card overflow-hidden" key={ans.id}>
               <div className="mb-5 flex gap-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-afpesp-600 text-sm font-bold text-white">
                   {i + 1}
                 </span>
-                <div>
-                  <div className="font-medium">{ans.question}</div>
+                <div className="min-w-0">
+                  <div className="break-words font-medium leading-relaxed">{ans.question}</div>
                   <div className="mt-2 text-sm font-semibold text-afpesp-700">
                     Requisito: {ans.requirement || "Não informado"}
                   </div>
@@ -1393,8 +1399,8 @@ function AuditForm() {
                       <div className="mb-1 font-semibold">Documentos aplicáveis:</div>
                       <ul className="space-y-1">
                         {answerDocuments(ans).map((document, documentIndex) => (
-                          <li key={`${document.code}-${document.version}-${documentIndex}`} className="flex items-start justify-between gap-3">
-                            <span>{documentIndex + 1}. {[document.type, document.code, document.title, document.version && `versão ${document.version}`].filter(Boolean).join(" — ")}</span>
+                          <li key={`${document.code}-${document.version}-${documentIndex}`} className="flex min-w-0 items-start justify-between gap-3">
+                            <span className="min-w-0 break-words">{documentIndex + 1}. {[document.type, document.code, document.title, document.version && `versão ${document.version}`].filter(Boolean).join(" — ")}</span>
                             {!readOnly && <button
                               type="button"
                               className="shrink-0 text-red-600"
@@ -1483,12 +1489,12 @@ function AuditForm() {
                 </div>}
               </div>
               {ans.photos.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-3">
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3">
                   {ans.photos.map((p, j) => (
-                    <div className="relative" key={j}>
+                    <div className="relative min-w-0" key={j}>
                       <img
                         src={p}
-                        className="h-28 w-40 rounded-lg object-cover"
+                        className="h-28 w-full rounded-lg object-cover sm:w-40"
                       />
                       {!readOnly && <button
                         className="absolute right-1 top-1 rounded-full bg-white p-1 shadow"
