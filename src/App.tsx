@@ -344,6 +344,13 @@ function HomePage() {
           icon={<ArchiveRestore />}
         />
         <Stat
+          title="Programadas"
+          value={String(
+            filtered.filter((a) => a.status === "Programada").length,
+          )}
+          icon={<ClipboardCheck />}
+        />
+        <Stat
           title="Em andamento"
           value={String(
             filtered.filter((a) => a.status === "Em andamento").length,
@@ -768,7 +775,7 @@ function AuditForm() {
     checklistName: "",
     auditors: auditorAtual ? [auditorAtual] : [],
     startDate: today(),
-    endDate: today(),
+    endDate: "",
     scope: "",
     objective: "",
     status: "Programada",
@@ -776,6 +783,7 @@ function AuditForm() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
+  const readOnly = audit.status === "Finalizada";
   useEffect(() => {
     if (id) db.audits.get(Number(id)).then((a) => a && setAudit(a));
   }, [id]);
@@ -847,6 +855,32 @@ function AuditForm() {
       : await db.audits.add(data);
     nav(`/auditorias/${saved}`);
   };
+  const startAudit = async () => {
+    if (!id || audit.status !== "Programada") return;
+    const updated: Audit = {
+      ...audit,
+      status: "Em andamento",
+      updatedAt: new Date().toISOString(),
+    };
+    await db.audits.put({ ...updated, id: Number(id) });
+    setAudit(updated);
+  };
+  const finalizeAudit = async () => {
+    if (!id || audit.status !== "Em andamento") return;
+    const unanswered = audit.answers.filter((answer) => !answer.classification).length;
+    const warning = unanswered
+      ? `Existem ${unanswered} questão(ões) sem classificação. Deseja finalizar mesmo assim?`
+      : "Finalizar esta auditoria? Após a finalização, o conteúdo ficará protegido contra alterações.";
+    if (!confirm(warning)) return;
+    const updated: Audit = {
+      ...audit,
+      status: "Finalizada",
+      endDate: today(),
+      updatedAt: new Date().toISOString(),
+    };
+    await db.audits.put({ ...updated, id: Number(id) });
+    setAudit(updated);
+  };
   const update = (i: number, p: Partial<Answer>) =>
     setAudit((a) => ({
       ...a,
@@ -882,7 +916,7 @@ function AuditForm() {
             >
               Voltar
             </button>
-            {id && (
+            {id && audit.status === "Finalizada" && (
               <button
                 className="btn-secondary"
                 onClick={() => exportDocx(audit)}
@@ -897,16 +931,30 @@ function AuditForm() {
                 Excluir auditoria
               </button>
             )}
+            {id && audit.status === "Programada" && (
+              <button className="btn-primary" onClick={startAudit}>
+                <ClipboardCheck size={16} />
+                Iniciar auditoria
+              </button>
+            )}
+            {id && audit.status === "Em andamento" && (
+              <button className="btn bg-blue-600 text-white hover:bg-blue-700" onClick={finalizeAudit}>
+                <ClipboardCheck size={16} />
+                Finalizar auditoria
+              </button>
+            )}
+            {(!id || audit.status === "Em andamento") && (
             <button className="btn-primary" onClick={save}>
               <Save size={16} />
               Salvar
             </button>
+            )}
           </div>
         }
       />
       {!id && (
         <div className="card">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4">
             <Field label="Data da auditoria">
               <input
                 type="date"
@@ -916,25 +964,9 @@ function AuditForm() {
                   setAudit({
                     ...audit,
                     startDate: e.target.value,
-                    endDate: e.target.value,
                   })
                 }
               />
-            </Field>
-            <Field label="Situação inicial">
-              <select
-                className="field"
-                value={audit.status}
-                onChange={(e) =>
-                  setAudit({
-                    ...audit,
-                    status: e.target.value as Audit["status"],
-                  })
-                }
-              >
-                <option>Programada</option>
-                <option>Em andamento</option>
-              </select>
             </Field>
           </div>
           <div className="mt-5">
@@ -1012,43 +1044,21 @@ function AuditForm() {
           {error}
         </p>
       )}
-      {(id || audit.answers.length > 0) && (
+      {id && (
         <div className="mt-6 space-y-6">
-          <div className="card grid gap-4 md:grid-cols-3">
-            <Field label="Auditor responsável">
-              <input
-                className="field bg-slate-100"
-                readOnly
-                value={audit.auditors.join(", ") || auditorAtual}
-              />
-            </Field>
-            <Field label="Situação">
-              <select
-                className="field"
-                value={audit.status}
-                onChange={(e) =>
-                  setAudit({
-                    ...audit,
-                    status: e.target.value as Audit["status"],
-                  })
-                }
-              >
-                <option>Programada</option>
-                <option>Em andamento</option>
-                <option>Finalizada</option>
-              </select>
-            </Field>
-            <Field label="Data final">
-              <input
-                type="date"
-                className="field"
-                value={audit.endDate}
-                onChange={(e) =>
-                  setAudit({ ...audit, endDate: e.target.value })
-                }
-              />
-            </Field>
+          <div className="card grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div><span className="label">Auditor responsável</span><div className="font-semibold">{audit.auditors.join(", ") || auditorAtual}</div></div>
+            <div><span className="label">Status</span><div className="font-semibold text-afpesp-700">{audit.status}</div></div>
+            <div><span className="label">Data programada</span><div className="font-semibold">{formatDate(audit.startDate)}</div></div>
+            <div><span className="label">Data de finalização</span><div className="font-semibold">{audit.status === "Finalizada" ? formatDate(audit.endDate) : "—"}</div></div>
           </div>
+          {audit.status === "Programada" && (
+            <div className="card text-center">
+              <p className="text-slate-600">A auditoria está programada. Clique em <b>Iniciar auditoria</b> para abrir o checklist e começar o preenchimento.</p>
+            </div>
+          )}
+          {audit.status !== "Programada" && (
+          <>
           {audit.answers.map((ans, i) => (
             <div className="card" key={ans.id}>
               <div className="mb-5 flex gap-3">
@@ -1067,20 +1077,20 @@ function AuditForm() {
                         {answerDocuments(ans).map((document, documentIndex) => (
                           <li key={`${document.code}-${document.version}-${documentIndex}`} className="flex items-start justify-between gap-3">
                             <span>{documentIndex + 1}. {[document.type, document.code, document.title, document.version && `versão ${document.version}`].filter(Boolean).join(" — ")}</span>
-                            <button
+                            {!readOnly && <button
                               type="button"
                               className="shrink-0 text-red-600"
                               title="Remover documento desta questão"
                               onClick={() => update(i, { documents: answerDocuments(ans).filter((_, index) => index !== documentIndex) })}
                             >
                               <X size={16} />
-                            </button>
+                            </button>}
                           </li>
                         ))}
                       </ul>
                     </div>
                   )}
-                  <DocumentPicker
+                  {!readOnly && <DocumentPicker
                     documents={registeredDocuments}
                     onAdd={(document) => {
                       const current = answerDocuments(ans);
@@ -1092,7 +1102,7 @@ function AuditForm() {
                       );
                       if (!exists) update(i, { documents: [...current, document] });
                     }}
-                  />
+                  />}
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -1102,6 +1112,7 @@ function AuditForm() {
                     {classes.map((classification) => (
                       <button
                         type="button"
+                        disabled={readOnly}
                         key={classification}
                         className={`classification-button ${
                           {
@@ -1122,6 +1133,7 @@ function AuditForm() {
                 <Field label="Evidência / constatação">
                   <textarea
                     className="field min-h-24"
+                    readOnly={readOnly}
                     value={ans.finding}
                     onChange={(e) => update(i, { finding: e.target.value })}
                   />
@@ -1131,6 +1143,7 @@ function AuditForm() {
                 <Field label="Recomendação">
                   <textarea
                     className="field min-h-24"
+                    readOnly={readOnly}
                     value={ans.recommendation}
                     onChange={(e) =>
                       update(i, { recommendation: e.target.value })
@@ -1138,7 +1151,7 @@ function AuditForm() {
                   />
                 </Field>
                 </div>
-                <div className="md:col-span-2">
+                {!readOnly && <div className="md:col-span-2">
                   <Field label="Fotos / evidências fotográficas">
                     <input
                       type="file"
@@ -1149,7 +1162,7 @@ function AuditForm() {
                       onChange={(e) => photos(i, e.target.files)}
                     />
                   </Field>
-                </div>
+                </div>}
               </div>
               {ans.photos.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-3">
@@ -1159,7 +1172,7 @@ function AuditForm() {
                         src={p}
                         className="h-28 w-40 rounded-lg object-cover"
                       />
-                      <button
+                      {!readOnly && <button
                         className="absolute right-1 top-1 rounded-full bg-white p-1 shadow"
                         onClick={() =>
                           update(i, {
@@ -1168,13 +1181,15 @@ function AuditForm() {
                         }
                       >
                         <X size={14} />
-                      </button>
+                      </button>}
                     </div>
                   ))}
                 </div>
               )}
             </div>
           ))}
+          </>
+          )}
         </div>
       )}
     </>
