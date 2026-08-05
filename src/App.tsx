@@ -115,6 +115,57 @@ type UserProfile = {
   active: boolean;
   must_change_password: boolean;
 };
+const remoteDataChangedEvent = "afpesp-remote-data-changed";
+const notifyRemoteDataChanged = () => window.dispatchEvent(new Event(remoteDataChangedEvent));
+function useRemoteData<T>(table: string, mapRow: (row: Record<string, unknown>, index: number) => T) {
+  const [items, setItems] = useState<T[]>([]);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const refresh = () => setRevision((value) => value + 1);
+    window.addEventListener(remoteDataChangedEvent, refresh);
+    return () => window.removeEventListener(remoteDataChangedEvent, refresh);
+  }, []);
+  useEffect(() => {
+    let active = true;
+    supabase
+      .from(table)
+      .select("*")
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error(`Falha ao consultar ${table}:`, error.message);
+          setItems([]);
+          return;
+        }
+        setItems((data ?? []).map((row, index) => mapRow(row as Record<string, unknown>, index)));
+      });
+    return () => { active = false; };
+  }, [table, revision]);
+  return items;
+}
+const useRemoteUnits = () => useRemoteData<Unit>("audit_units", (row, index) => ({
+  id: index + 1,
+  remoteId: String(row.id),
+  name: String(row.name),
+  type: row.location_type as LocationType,
+  active: Boolean(row.active),
+}));
+const useRemoteAuditors = () => useRemoteData<Auditor>("audit_profiles", (row, index) => ({
+  id: index + 1,
+  remoteId: String(row.id),
+  name: String(row.full_name),
+  role: String(row.role),
+  active: Boolean(row.active),
+}));
+const useRemoteDocuments = () => useRemoteData<RegisteredDocument>("audit_documents", (row, index) => ({
+  id: index + 1,
+  remoteId: String(row.id),
+  type: String(row.document_type),
+  code: String(row.code),
+  title: String(row.title),
+  version: String(row.version),
+  active: Boolean(row.active),
+}));
 const formatDate = (value: string) =>
   value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "—";
 function Layout({
@@ -385,8 +436,7 @@ function AuditStatusDoughnut({
 }
 function HomePage() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
-  const units =
-    useLiveQuery(() => db.units.filter((item) => item.active).toArray(), []) ?? [];
+  const units = useRemoteUnits().filter((item) => item.active);
   const nav = useNavigate();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
   const [unit, setUnit] = useState("Todos");
@@ -866,22 +916,10 @@ function AuditHub({ isAdmin }: { isAdmin: boolean }) {
       ? initialStatus
       : "Todos",
   );
-  const units =
-    useLiveQuery<Unit[]>(
-      () =>
-        type !== "Todos"
-          ? db.units
-              .where("type")
-              .equals(type)
-              .and((u) => u.active)
-              .toArray()
-          : db.units.filter((item) => item.active).toArray(),
-      [type],
-    ) ?? [];
+  const units = useRemoteUnits().filter((item) => item.active && (type === "Todos" || item.type === type));
   const audits =
     useLiveQuery<Audit[]>(() => db.audits.toArray(), []) ?? [];
-  const auditors =
-    useLiveQuery<Auditor[]>(() => db.auditors.filter((auditor) => auditor.active).sortBy("name"), []) ?? [];
+  const auditors = useRemoteAuditors().filter((auditor) => auditor.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
     (a) =>
@@ -1197,10 +1235,8 @@ function AuditForm() {
           .sortBy("createdAt"),
       [selectedUnit, locationType],
     ) ?? [];
-  const registeredDocuments =
-    useLiveQuery(() => db.documents.filter((document) => document.active).toArray(), []) ?? [];
-  const availableAuditors =
-    useLiveQuery(() => db.auditors.filter((auditor) => auditor.active).sortBy("name"), []) ?? [];
+  const registeredDocuments = useRemoteDocuments().filter((document) => document.active);
+  const availableAuditors = useRemoteAuditors().filter((auditor) => auditor.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const [mode, setMode] = useState<"anterior" | "novo">(
     params.get("mode") === "novo" ? "novo" : "anterior",
   );
@@ -1731,7 +1767,7 @@ function Cadastros() {
   );
 }
 function Locations() {
-  const items = useLiveQuery(() => db.units.toArray(), []) ?? [];
+  const items = useRemoteUnits();
   const [name, setName] = useState("");
   const [type, setType] = useState<LocationType>("Unidade de Lazer");
   const [search, setSearch] = useState("");
@@ -1741,8 +1777,10 @@ function Locations() {
   );
   const add = async () => {
     if (name.trim()) {
-      await db.units.add({ name: name.trim(), type, active: true });
+      const { error } = await supabase.from("audit_units").insert({ name: name.trim(), location_type: type, active: true });
+      if (error) return alert(`Não foi possível cadastrar o local: ${error.message}`);
       setName("");
+      notifyRemoteDataChanged();
     }
   };
   return (
@@ -1777,7 +1815,12 @@ function Locations() {
           {filteredItems.map((x) => (
             <div key={x.id} className="flex justify-between border-t py-2 text-sm">
               <span><b>{x.type}</b> — {x.name}</span>
-              <button className="text-red-600" onClick={() => db.units.delete(x.id!)}><Trash2 size={16} /></button>
+              <button className="text-red-600" onClick={async () => {
+                if (!x.remoteId || !confirm(`Excluir o local ${x.name}?`)) return;
+                const { error } = await supabase.from("audit_units").delete().eq("id", x.remoteId);
+                if (error) return alert(`Não foi possível excluir o local: ${error.message}`);
+                notifyRemoteDataChanged();
+              }}><Trash2 size={16} /></button>
             </div>
           ))}
         </div>
@@ -1786,34 +1829,14 @@ function Locations() {
   );
 }
 function CrudAuditors() {
-  const items = useLiveQuery(() => db.auditors.toArray(), []) ?? [];
-  const [name, setName] = useState("");
-  const add = async () => {
-    if (name.trim()) {
-      await db.auditors.add({
-        name: name.trim(),
-        role: "Auditor",
-        active: true,
-      });
-      setName("");
-    }
-  };
+  const items = useRemoteAuditors();
   return (
     <div className="card">
       <h2 className="mb-4 flex gap-2 font-bold">
         <Users />
         Auditores
       </h2>
-      <div className="mb-3 flex gap-2">
-        <input
-          className="field"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button className="btn-primary px-3" onClick={add}>
-          <Plus size={16} />
-        </button>
-      </div>
+      <p className="mb-3 text-sm text-slate-500">Os auditores são vinculados automaticamente aos usuários ativos do Supabase.</p>
       <details className="mt-4 rounded-lg border border-slate-200">
         <summary className="cursor-pointer select-none p-3 text-sm font-semibold text-afpesp-700">
           Consultar auditores cadastrados ({items.length})
@@ -1822,7 +1845,7 @@ function CrudAuditors() {
           {items.map((x: Auditor) => (
             <div key={x.id} className="flex justify-between border-t py-2 text-sm">
               <span>{x.name}</span>
-              <button className="text-red-600" onClick={() => db.auditors.delete(x.id!)}><Trash2 size={16} /></button>
+              <span className="text-xs font-semibold text-slate-400">{x.active ? "Ativo" : "Inativo"}</span>
             </div>
           ))}
         </div>
@@ -1831,7 +1854,7 @@ function CrudAuditors() {
   );
 }
 function DocumentsRegistry() {
-  const items = useLiveQuery(() => db.documents.toArray(), []) ?? [];
+  const items = useRemoteDocuments();
   const [type, setType] = useState<(typeof documentTypes)[number]>("Procedimento Operacional");
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
@@ -1864,8 +1887,19 @@ function DocumentsRegistry() {
       setMessage("Este documento e versão já estão cadastrados.");
       return;
     }
-    await db.documents.add(record);
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) return setMessage("Usuário não identificado.");
+    const { error } = await supabase.from("audit_documents").insert({
+      document_type: record.type,
+      code: record.code,
+      title: record.title,
+      version: record.version,
+      active: true,
+      created_by: userData.user.id,
+    });
+    if (error) return setMessage(`Não foi possível cadastrar o documento: ${error.message}`);
     setCode(""); setTitle(""); setVersion(""); setMessage("");
+    notifyRemoteDataChanged();
   };
   return (
     <div className="card">
@@ -1909,7 +1943,12 @@ function DocumentsRegistry() {
               {filtered.map((document) => (
                 <tr key={document.id} className="border-t">
                   <td className="p-3">{document.type}</td><td className="p-3 font-semibold">{document.code}</td><td className="p-3">{document.title}</td><td className="p-3">{document.version}</td>
-                  <td className="p-3 text-right"><button className="text-red-600" title="Excluir documento" onClick={() => confirm("Excluir este documento cadastrado?") && db.documents.delete(document.id!)}><Trash2 size={16} /></button></td>
+                  <td className="p-3 text-right"><button className="text-red-600" title="Excluir documento" onClick={async () => {
+                    if (!document.remoteId || !confirm("Excluir este documento cadastrado?")) return;
+                    const { error } = await supabase.from("audit_documents").delete().eq("id", document.remoteId);
+                    if (error) return setMessage(`Não foi possível excluir o documento: ${error.message}`);
+                    notifyRemoteDataChanged();
+                  }}><Trash2 size={16} /></button></td>
                 </tr>
               ))}
             </tbody>
