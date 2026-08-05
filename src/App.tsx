@@ -101,8 +101,13 @@ const documentTypes = [
   "Instrução de Trabalho",
   "Especificação",
   "MOD G",
+  "Manual",
+  "Política",
+  "Escopo",
+  "Organograma",
   "Legislação",
   "Norma",
+  "Outros documentos controlados",
 ] as const;
 const today = () => new Date().toISOString().slice(0, 10);
 type LayoutMode = "web" | "mobile";
@@ -1159,6 +1164,99 @@ function normalize(s: string) {
     .toLowerCase()
     .trim();
 }
+type MasterDocumentImportRow = {
+  document_type: (typeof documentTypes)[number];
+  code: string;
+  normalized_code: string;
+  title: string;
+  version: string;
+  source_status: "Ativo" | "Inativo" | "Em elaboração";
+};
+const normalizeDocumentCode = (value: unknown) => String(value ?? "")
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toUpperCase()
+  .replace(/[^A-Z0-9]+/g, "");
+const formatMasterVersion = (value: unknown) => {
+  const text = String(value ?? "").trim().replace(/\.0$/, "");
+  return /^\d+$/.test(text) ? text.padStart(3, "0") : text;
+};
+const masterStatus = (value: unknown): MasterDocumentImportRow["source_status"] | null => {
+  const status = normalize(String(value ?? ""));
+  if (status === "ativo") return "Ativo";
+  if (status === "inativo") return "Inativo";
+  if (status === "em elaboracao") return "Em elaboração";
+  return null;
+};
+const documentTypeFromCode = (code: string): MasterDocumentImportRow["document_type"] => {
+  const normalized = normalizeDocumentCode(code);
+  if (normalized.startsWith("PO")) return "Procedimento Operacional";
+  if (normalized.startsWith("IT")) return "Instrução de Trabalho";
+  if (normalized.startsWith("ESP")) return "Especificação";
+  if (/^(MGP|MBP|MCR|MCTR|MMA|MQ|MI|MGPS)/.test(normalized)) return "Manual";
+  if (normalized.startsWith("POLITICA")) return "Política";
+  if (normalized.startsWith("ESCOPO")) return "Escopo";
+  if (normalized.startsWith("ORG")) return "Organograma";
+  return "Outros documentos controlados";
+};
+async function readMasterDocumentList(file: File) {
+  const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+  const documentSheet = workbook.Sheets["Documentos"];
+  const formSheet = workbook.Sheets["Formulários"];
+  if (!documentSheet || !formSheet)
+    throw new Error("A planilha precisa conter as abas Documentos e Formulários.");
+  const collected: MasterDocumentImportRow[] = [];
+  let sourceRows = 0;
+  let skipped = 0;
+  const documentRows = XLSX.utils.sheet_to_json<unknown[]>(documentSheet, { header: 1, defval: "", raw: true });
+  for (const row of documentRows.slice(2)) {
+    if (!row[0]) continue;
+    sourceRows += 1;
+    const status = masterStatus(row[4]);
+    const code = String(row[0]).trim();
+    const title = String(row[1] ?? "").trim();
+    const version = formatMasterVersion(row[2]);
+    if (!status || !code || !title || !version) { skipped += 1; continue; }
+    collected.push({
+      document_type: documentTypeFromCode(code),
+      code,
+      normalized_code: normalizeDocumentCode(code),
+      title,
+      version,
+      source_status: status,
+    });
+  }
+  const formRows = XLSX.utils.sheet_to_json<unknown[]>(formSheet, { header: 1, defval: "", raw: true });
+  for (const row of formRows.slice(2)) {
+    if (!row[0]) continue;
+    sourceRows += 1;
+    const status = masterStatus(row[6]);
+    const number = String(row[2] ?? "").trim().replace(/\.0$/, "");
+    const title = String(row[3] ?? "").trim();
+    const version = formatMasterVersion(row[4]);
+    const code = `MOD G ${number}`;
+    if (!status || !number || !title || !version) { skipped += 1; continue; }
+    collected.push({
+      document_type: "MOD G",
+      code,
+      normalized_code: normalizeDocumentCode(code),
+      title,
+      version,
+      source_status: status,
+    });
+  }
+  const priority = { "Ativo": 3, "Em elaboração": 2, "Inativo": 1 } as const;
+  const currentByCode = new Map<string, MasterDocumentImportRow>();
+  for (const document of collected) {
+    const current = currentByCode.get(document.normalized_code);
+    const documentVersion = Number(document.version) || 0;
+    const currentVersion = Number(current?.version) || 0;
+    if (!current || priority[document.source_status] > priority[current.source_status] ||
+      (priority[document.source_status] === priority[current.source_status] && documentVersion > currentVersion))
+      currentByCode.set(document.normalized_code, document);
+  }
+  return { documents: [...currentByCode.values()], sourceRows, skipped };
+}
 async function readChecklist(file: File): Promise<ChecklistItem[]> {
   const wb = XLSX.read(await file.arrayBuffer());
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
@@ -1861,6 +1959,8 @@ function DocumentsRegistry() {
   const [version, setVersion] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<Record<string, number> | null>(null);
   const filtered = items
     .filter((document) => document.type === type)
     .filter((document) => !search.trim() || normalize(`${document.code} ${document.title} ${document.version}`).includes(normalize(search)))
@@ -1892,20 +1992,65 @@ function DocumentsRegistry() {
     const { error } = await supabase.from("audit_documents").insert({
       document_type: record.type,
       code: record.code,
+      normalized_code: normalizeDocumentCode(record.code),
       title: record.title,
       version: record.version,
       active: true,
+      source_status: "Ativo",
       created_by: userData.user.id,
     });
     if (error) return setMessage(`Não foi possível cadastrar o documento: ${error.message}`);
     setCode(""); setTitle(""); setVersion(""); setMessage("");
     notifyRemoteDataChanged();
   };
+  const importMasterList = async (file?: File) => {
+    if (!file) return;
+    setImporting(true);
+    setMessage("");
+    setImportSummary(null);
+    try {
+      const parsed = await readMasterDocumentList(file);
+      const { data, error } = await supabase.rpc("import_audit_master", {
+        p_documents: parsed.documents,
+        p_source_file: file.name,
+      });
+      if (error) throw error;
+      setImportSummary({
+        ...(data as Record<string, number>),
+        linhas_origem: parsed.sourceRows,
+        linhas_ignoradas: parsed.skipped,
+      });
+      notifyRemoteDataChanged();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível processar a Lista Mestra.");
+    } finally {
+      setImporting(false);
+    }
+  };
   return (
     <div className="card">
-      <h2 className="mb-4 flex items-center gap-2 font-bold">
-        <ClipboardCheck /> Documentos
-      </h2>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="flex items-center gap-2 font-bold"><ClipboardCheck /> Documentos</h2>
+        <label className={`btn-primary cursor-pointer ${importing ? "pointer-events-none opacity-60" : ""}`}>
+          <FileDown size={16} /> {importing ? "Atualizando..." : "Atualizar pela Lista Mestra"}
+          <input type="file" accept=".xls,.xlsx" className="hidden" disabled={importing} onChange={(event) => {
+            const file = event.target.files?.[0];
+            void importMasterList(file);
+            event.target.value = "";
+          }} />
+        </label>
+      </div>
+      <p className="mb-4 text-sm text-slate-500">Importe a Lista Mestra para cadastrar documentos novos, atualizar versões e inativar itens conforme as abas Documentos e Formulários.</p>
+      {importSummary && (
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-center sm:grid-cols-4 lg:grid-cols-7">
+          {[
+            ["Novos", importSummary.inseridos], ["Atualizados", importSummary.atualizados],
+            ["Inativados", importSummary.inativados], ["Sem alteração", importSummary.mantidos],
+            ["Em elaboração", importSummary.em_elaboracao], ["Linhas lidas", importSummary.linhas_origem],
+            ["Ignoradas", importSummary.linhas_ignoradas],
+          ].map(([label, value]) => <div key={String(label)}><div className="text-lg font-bold text-afpesp-800">{Number(value ?? 0)}</div><div className="text-xs font-semibold text-slate-500">{label}</div></div>)}
+        </div>
+      )}
       <div className="mb-4 grid gap-3 md:grid-cols-2">
         <Field label="Filtrar por tipo de documento">
           <select className="field" value={type} onChange={(e) => setType(e.target.value as (typeof documentTypes)[number])}>
