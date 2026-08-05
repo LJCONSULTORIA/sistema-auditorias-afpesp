@@ -334,7 +334,7 @@ function AuditStatusDoughnut({
   counts: number[];
 }) {
   const labels = ["Finalizadas", "Em andamento", "Programadas"];
-  const colors = ["#0b2447", "#f59e0b", "#3b82f6"];
+  const colors = ["#22c55e", "#facc15", "#38bdf8"];
   return (
     <div className="card p-4 sm:p-5">
       <h2 className="text-xl font-bold text-afpesp-700">{title}</h2>
@@ -568,7 +568,7 @@ function HomePage() {
               datasets: [
                 {
                   data: counts,
-                  backgroundColor: ["#2563eb", "#e11d48", "#38bdf8", "#f59e0b"],
+                  backgroundColor: ["#22c55e", "#ef4444", "#38bdf8", "#facc15"],
                   borderWidth: 0,
                   hoverOffset: 8,
                 },
@@ -577,16 +577,6 @@ function HomePage() {
             options={{ maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom", labels: { usePointStyle: true, padding: 18 } } } }}
           /></div>
         </div>
-        <AuditStatusDoughnut
-          title="Auditorias — Sede Social"
-          subtitle="Situação das auditorias dos setores da Sede Social."
-          counts={headOfficeStatusCounts}
-        />
-        <AuditStatusDoughnut
-          title="Auditorias — Unidades de Lazer"
-          subtitle="Situação das auditorias das Unidades de Lazer."
-          counts={leisureStatusCounts}
-        />
         <div className="card p-4 sm:p-5">
           <h2 className="text-xl font-bold text-afpesp-700">
             Auditorias por situação
@@ -600,7 +590,7 @@ function HomePage() {
               datasets: [{
                 label: "Auditorias",
                 data: statusCounts,
-                backgroundColor: ["#3b82f6", "#f59e0b", "#0b2447"],
+                backgroundColor: ["#38bdf8", "#facc15", "#22c55e"],
                 borderRadius: 10,
                 borderSkipped: false,
                 categoryPercentage: 0.72,
@@ -628,7 +618,17 @@ function HomePage() {
             }}
           /></div>
         </div>
-        <div className="card p-4 sm:p-5">
+        <AuditStatusDoughnut
+          title="Auditorias — Unidades de Lazer"
+          subtitle="Situação das auditorias das Unidades de Lazer."
+          counts={leisureStatusCounts}
+        />
+        <AuditStatusDoughnut
+          title="Auditorias — Sede Social"
+          subtitle="Situação das auditorias dos setores da Sede Social."
+          counts={headOfficeStatusCounts}
+        />
+        <div className="card p-4 sm:p-5 lg:col-span-2">
           <h2 className="text-xl font-bold text-afpesp-700">
             Não conformidades por requisito
           </h2>
@@ -649,7 +649,7 @@ function HomePage() {
                           a.classification === "Não Conforme",
                       ).length,
                   ),
-                  backgroundColor: "#245a9b",
+                  backgroundColor: "#ef4444",
                   borderRadius: 10,
                   borderSkipped: false,
                   maxBarThickness: 64,
@@ -680,10 +680,10 @@ function ResultAnalysis({
   onClose: () => void;
 }) {
   const color = {
-    Conforme: "#2563eb",
-    "Não Conforme": "#e11d48",
+    Conforme: "#22c55e",
+    "Não Conforme": "#ef4444",
     "Oportunidade de Melhoria": "#38bdf8",
-    Risco: "#f59e0b",
+    Risco: "#facc15",
   }[classification];
   return (
     <section className="card my-6 border-afpesp-200 p-4 sm:p-5">
