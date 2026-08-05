@@ -1,14 +1,16 @@
 import {
   AlignmentType,
+  BorderStyle,
   Document,
-  HeadingLevel,
   ImageRun,
   Packer,
   Paragraph,
+  ShadingType,
   Table,
   TableCell,
   TableRow,
   TextRun,
+  VerticalAlign,
   WidthType,
 } from "docx";
 import { saveAs } from "file-saver";
@@ -31,7 +33,42 @@ const documentsOf = (answer: Answer): DocumentReference[] =>
           version: answer.documentVersion || "",
         }]
       : [];
-export async function exportDocx(a: Audit) {
+const formatDate = (value: string) =>
+  value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "Não informado";
+const reportFont = "Arial";
+const editableField = "Clique aqui para preencher.";
+const borders = {
+  top: { style: BorderStyle.SINGLE, size: 4, color: "808080" },
+  bottom: { style: BorderStyle.SINGLE, size: 4, color: "808080" },
+  left: { style: BorderStyle.SINGLE, size: 4, color: "808080" },
+  right: { style: BorderStyle.SINGLE, size: 4, color: "808080" },
+  insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: "B7B7B7" },
+  insideVertical: { style: BorderStyle.SINGLE, size: 4, color: "B7B7B7" },
+};
+const text = (value: string, options: { bold?: boolean; size?: number; color?: string; italics?: boolean } = {}) =>
+  new TextRun({
+    text: value,
+    font: reportFont,
+    size: options.size ?? 22,
+    bold: options.bold,
+    color: options.color,
+    italics: options.italics,
+  });
+const bodyParagraph = (children: TextRun[] | string, options: { after?: number; before?: number; alignment?: (typeof AlignmentType)[keyof typeof AlignmentType] } = {}) =>
+  new Paragraph({
+    children: typeof children === "string" ? [text(children)] : children,
+    alignment: options.alignment ?? AlignmentType.JUSTIFIED,
+    spacing: { before: options.before ?? 0, after: options.after ?? 140, line: 276 },
+  });
+const sectionTitle = (number: number, title: string) =>
+  new Paragraph({
+    children: [text(`${number} - ${title}`, { bold: true })],
+    spacing: { before: 280, after: 140 },
+    keepNext: true,
+  });
+const questionLabel = (label: string, value: string) =>
+  bodyParagraph([text(`${label}: `, { bold: true }), text(value || "Não informado")]);
+export async function buildAuditReport(a: Audit) {
   const documentRows = Array.from(
     new Map(
       a.answers
@@ -39,23 +76,40 @@ export async function exportDocx(a: Audit) {
         .map((document) => [[document.type, document.code, document.title, document.version].join("|"), document]),
     ).values(),
   );
+  const requirements = [...new Set(
+    a.answers
+      .flatMap((answer) => answer.requirement.split(/[;,|/\n]+/))
+      .map((requirement) => requirement.trim())
+      .filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right, "pt-BR", { numeric: true }));
+  const counts = {
+    conforme: a.answers.filter((answer) => answer.classification === "Conforme").length,
+    oportunidade: a.answers.filter((answer) => answer.classification === "Oportunidade de Melhoria").length,
+    naoConforme: a.answers.filter((answer) => answer.classification === "Não Conforme").length,
+    risco: a.answers.filter((answer) => answer.classification === "Risco").length,
+  };
+  const nonConformities = a.answers
+    .map((answer, index) => ({ answer, index }))
+    .filter(({ answer }) => answer.classification === "Não Conforme");
   const children: (Paragraph | Table)[] = [
     new Paragraph({
-      text: "RELATÓRIO DE AUDITORIA INTERNA",
-      heading: HeadingLevel.TITLE,
+      children: [text("RELATÓRIO DE AUDITORIA INTERNA", { bold: true, size: 36 })],
       alignment: AlignmentType.CENTER,
+      spacing: { after: 100 },
     }),
     new Paragraph({
-      text: "AFPESP",
-      heading: HeadingLevel.HEADING_1,
+      children: [new TextRun({ text: "AFPESP", font: "Times New Roman", size: 32, bold: true, color: "4472C4" })],
       alignment: AlignmentType.CENTER,
+      spacing: { after: 260 },
     }),
     new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
+      width: { size: 9638, type: WidthType.DXA },
+      columnWidths: [1900, 7738],
+      borders,
       rows: [
         ["Local", `${a.locationType} — ${a.unit}`],
-        ["Checklist", a.checklistName],
-        ["Período", `${a.startDate} a ${a.endDate}`],
+        ["Checklist", clean(a.checklistName)],
+        ["Período", `${formatDate(a.startDate)} a ${formatDate(a.endDate)}`],
         ["Auditor(es)", a.auditors.join(", ")],
         ["Objetivo", clean(a.objective)],
         ["Escopo", clean(a.scope)],
@@ -64,106 +118,164 @@ export async function exportDocx(a: Audit) {
           new TableRow({
             children: [
               new TableCell({
+                width: { size: 1900, type: WidthType.DXA },
+                shading: { type: ShadingType.CLEAR, fill: "E7E6E6" },
+                verticalAlign: VerticalAlign.CENTER,
                 children: [
                   new Paragraph({
-                    children: [new TextRun({ text: x, bold: true })],
+                    children: [text(x, { bold: true })],
+                    spacing: { before: 40, after: 40 },
                   }),
                 ],
               }),
-              new TableCell({ children: [new Paragraph(y)] }),
+              new TableCell({
+                width: { size: 7738, type: WidthType.DXA },
+                verticalAlign: VerticalAlign.CENTER,
+                children: [new Paragraph({ children: [text(y)], spacing: { before: 40, after: 40 } })],
+              }),
             ],
           }),
       ),
     }),
+    sectionTitle(1, "Objetivo"),
+    bodyParagraph(clean(a.objective)),
+    sectionTitle(2, "Responsável pelo setor"),
+    bodyParagraph([text(editableField, { italics: true, color: "7F7F7F" })]),
+    sectionTitle(3, "Auditados"),
+    bodyParagraph([text(editableField, { italics: true, color: "7F7F7F" })]),
+    sectionTitle(4, "Requisitos da Norma ISO 9001:2015 e verificação da eficácia de treinamentos"),
+    bodyParagraph(requirements.length
+      ? `Requisitos aplicáveis identificados no checklist: ${requirements.join("; ")}.`
+      : "Não foram informados requisitos aplicáveis no checklist."),
   ];
   if (documentRows.length) {
     children.push(
       new Paragraph({
-        text: "DOCUMENTOS DE REFERÊNCIA",
-        heading: HeadingLevel.HEADING_1,
-        spacing: { before: 360, after: 180 },
+        children: [text("DOCUMENTOS DE REFERÊNCIA", { bold: true, size: 32, color: "4472C4" })],
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 300, after: 180 },
+        keepNext: true,
       }),
       new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
+        width: { size: 9638, type: WidthType.DXA },
+        columnWidths: [1900, 4988, 1200, 775, 775],
+        borders,
         rows: [
-          ["Tipo", "Código", "Título", "Versão"],
+          new TableRow({
+            tableHeader: true,
+            children: [
+              ["Código", 1900], ["Título", 4988], ["Versão", 1200], ["Eficaz?", 1550],
+            ].map(([value, width]) => new TableCell({
+              width: { size: Number(width), type: WidthType.DXA },
+              columnSpan: value === "Eficaz?" ? 2 : 1,
+              rowSpan: value === "Eficaz?" ? 1 : 2,
+              shading: { type: ShadingType.CLEAR, fill: "D9EAF7" },
+              verticalAlign: VerticalAlign.CENTER,
+              children: [new Paragraph({
+                children: [text(String(value), { bold: true })],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 40, after: 40 },
+              })],
+            })),
+          }),
+          new TableRow({
+            tableHeader: true,
+            children: ["Sim", "Não"].map((value) => new TableCell({
+              width: { size: 775, type: WidthType.DXA },
+              shading: { type: ShadingType.CLEAR, fill: "D9EAF7" },
+              verticalAlign: VerticalAlign.CENTER,
+              children: [new Paragraph({
+                children: [text(value, { bold: true })],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 40, after: 40 },
+              })],
+            })),
+          }),
           ...documentRows.map((document) => [
-            document.type || "—",
             document.code || "—",
             document.title || "—",
             document.version || "—",
-          ]),
-        ].map((row, rowIndex) =>
+            "☐",
+            "☐",
+          ]).map((row) =>
           new TableRow({
-            children: row.map((value) =>
+            children: row.map((value, columnIndex) =>
               new TableCell({
+                width: { size: [1900, 4988, 1200, 775, 775][columnIndex], type: WidthType.DXA },
+                verticalAlign: VerticalAlign.CENTER,
                 children: [
                   new Paragraph({
-                    children: [new TextRun({ text: value, bold: rowIndex === 0 })],
+                    children: [text(value)],
+                    alignment: value === "☐" ? AlignmentType.CENTER : AlignmentType.LEFT,
+                    spacing: { before: 40, after: 40 },
                   }),
                 ],
               }),
             ),
           }),
         ),
+        ],
       }),
     );
   }
+  children.push(
+    sectionTitle(5, `Análise de dados do local da avaliação em ${a.startDate?.slice(0, 4) || "____"}`),
+    bodyParagraph([text(editableField, { italics: true, color: "7F7F7F" })]),
+    sectionTitle(6, "Desenvolvimento da avaliação"),
+    bodyParagraph(a.answers.some((answer) => answer.process.trim())
+      ? `Processos auditados: ${[...new Set(a.answers.map((answer) => answer.process.trim()).filter(Boolean))].join("; ")}.`
+      : "Processos auditados: não informados no checklist."),
+    sectionTitle(7, "Resultado das avaliações anteriores"),
+    bodyParagraph([text(editableField, { italics: true, color: "7F7F7F" })]),
+    sectionTitle(8, "Sumário da avaliação"),
+    bodyParagraph("Foram registrados os seguintes resultados durante a auditoria:"),
+    new Paragraph({ text: `${counts.conforme} Conformidade(s);`, bullet: { level: 0 }, spacing: { after: 60 } }),
+    new Paragraph({ text: `${counts.oportunidade} Oportunidade(s) de melhoria;`, bullet: { level: 0 }, spacing: { after: 60 } }),
+    new Paragraph({ text: `${counts.naoConforme} Não conformidade(s);`, bullet: { level: 0 }, spacing: { after: 60 } }),
+    new Paragraph({ text: `${counts.risco} Risco(s).`, bullet: { level: 0 }, spacing: { after: 140 } }),
+  );
+  if (nonConformities.length) {
+    children.push(bodyParagraph([text("Localização das não conformidades:", { bold: true })]));
+    nonConformities.forEach(({ answer, index }, ncIndex) => {
+      children.push(bodyParagraph(
+        `${ncIndex + 1}. Questão ${index + 1} — Requisito ${clean(answer.requirement)} — RAC: não informado.`,
+      ));
+    });
+  } else {
+    children.push(bodyParagraph("Não foram registradas não conformidades nesta auditoria."));
+  }
+  children.push(
+    sectionTitle(9, "Parecer da equipe auditora (conclusão, pontos positivos e principais pontos de melhoria)"),
+    bodyParagraph([text(editableField, { italics: true, color: "7F7F7F" })]),
+    sectionTitle(10, "Processos verificados"),
+    bodyParagraph("A seguir são apresentadas as constatações, evidências e classificações de todos os itens auditados."),
+  );
   for (let i = 0; i < a.answers.length; i += 1) {
     const ans = a.answers[i];
     children.push(
       new Paragraph({
-        text: `${i + 1}. ${ans.question}`,
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 420, after: 160 },
+        children: [text(`${i + 1}. ${clean(ans.question)}`, { bold: true })],
+        alignment: AlignmentType.JUSTIFIED,
+        spacing: { before: 300, after: 160, line: 276 },
+        keepNext: true,
       }),
-      new Paragraph({
-        children: [
-          new TextRun({ text: "Requisito: ", bold: true }),
-          new TextRun(clean(ans.requirement)),
-        ],
-      }),
+      questionLabel("Requisito", clean(ans.requirement)),
       ...(documentsOf(ans).length
         ? [
-            new Paragraph({
-              children: [
-                new TextRun({ text: "Documentos aplicáveis:", bold: true }),
-              ],
-            }),
+            bodyParagraph([text("Documentos aplicáveis:", { bold: true })]),
             ...documentsOf(ans).map((document, documentIndex) =>
-              new Paragraph({
-                text: `${documentIndex + 1}. ${[
-                  document.type,
+              bodyParagraph(`${documentIndex + 1}. ${[
                   document.code,
                   document.title,
                   document.version && `Versão ${document.version}`,
-                ].filter(Boolean).join(" — ")}`,
-              }),
+                ].filter(Boolean).join(" — ")}`),
             ),
           ]
         : []),
-      new Paragraph({
-        children: [
-          new TextRun({ text: "Classificação: ", bold: true }),
-          new TextRun(ans.classification || "Não classificada"),
-        ],
-      }),
-      new Paragraph({
-        children: [
-          new TextRun({ text: "Descrição: ", bold: true }),
-          new TextRun(clean(ans.finding)),
-        ],
-      }),
+      questionLabel("Classificação", ans.classification || "Não classificada"),
+      questionLabel("Descrição", clean(ans.finding)),
+      questionLabel("Evidência", clean(ans.recommendation)),
     );
-    if (ans.recommendation)
-      children.push(
-        new Paragraph({
-          children: [
-            new TextRun({ text: "Evidência: ", bold: true }),
-            new TextRun(ans.recommendation),
-          ],
-        }),
-      );
     for (let j = 0; j < ans.photos.length; j += 1) {
       const p = ans.photos[j];
       children.push(
@@ -183,15 +295,32 @@ export async function exportDocx(a: Audit) {
           alignment: AlignmentType.CENTER,
         }),
         new Paragraph({
-          text: `Evidência fotográfica ${j + 1} — questão ${i + 1}`,
+          children: [text(`Evidência fotográfica ${j + 1} — questão ${i + 1}`, { italics: true })],
           alignment: AlignmentType.CENTER,
+          spacing: { after: 180 },
         }),
       );
     }
   }
-  const blob = await Packer.toBlob(
-    new Document({ sections: [{ properties: {}, children }] }),
-  );
+  return new Document({
+      styles: {
+        default: {
+          document: { run: { font: reportFont, size: 22 } },
+        },
+      },
+      sections: [{
+        properties: {
+          page: {
+            size: { width: 11906, height: 16838 },
+            margin: { top: 1134, right: 1134, bottom: 1134, left: 1134 },
+          },
+        },
+        children,
+      }],
+    });
+}
+export async function exportDocx(a: Audit) {
+  const blob = await Packer.toBlob(await buildAuditReport(a));
   saveAs(blob, `Relatorio_Auditoria_${a.id ?? "nova"}.docx`);
 }
 export function exportExcel(audits: Audit[]) {
