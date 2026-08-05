@@ -36,6 +36,8 @@ import {
 import type { Plugin } from "chart.js";
 import { Bar, Doughnut } from "react-chartjs-2";
 import type { Session } from "@supabase/supabase-js";
+import { saveAs } from "file-saver";
+import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import type {
   Answer,
@@ -1115,7 +1117,7 @@ function AuditManagement({
                   <Download size={16} /> Baixar relatório Word
                 </button>
               )}
-              {(a.status !== "Finalizada" || isAdmin) && (
+              {isAdmin && (
                 <button
                   type="button"
                   className="btn w-full bg-red-50 text-red-700 hover:bg-red-100 sm:w-auto"
@@ -1319,15 +1321,17 @@ function AuditForm() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const [auditorAtual, setAuditorAtual] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       const { data: userProfile } = await supabase
         .from("audit_profiles")
-        .select("full_name")
+        .select("full_name,role")
         .eq("id", data.user.id)
         .single();
       if (userProfile?.full_name) setAuditorAtual(userProfile.full_name);
+      setIsAdmin(userProfile?.role === "admin");
     });
   }, []);
   const locationType =
@@ -1441,7 +1445,7 @@ function AuditForm() {
     }));
   };
   const deleteEditableAudit = async () => {
-    if (!id || audit.status === "Finalizada") return;
+    if (!id || audit.status === "Finalizada" || !isAdmin) return;
     if (!confirm(`Excluir esta auditoria ${audit.status.toLowerCase()}? Esta ação não pode ser desfeita.`)) return;
     await deleteRemoteAudit(id);
     notifyRemoteDataChanged();
@@ -1575,7 +1579,7 @@ function AuditForm() {
                 Gerar relatório
               </button>
             )}
-            {id && audit.status !== "Finalizada" && (
+            {id && audit.status !== "Finalizada" && isAdmin && (
               <button className="btn border border-red-300 bg-red-50 text-red-700 hover:bg-red-100" onClick={deleteEditableAudit}>
                 <Trash2 size={16} />
                 Excluir auditoria
@@ -2359,6 +2363,7 @@ function UsersAdmin() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>("auditor");
   const [loading, setLoading] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
   const [message, setMessage] = useState("");
   const invoke = async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("manage-audit-users", { body });
@@ -2403,6 +2408,81 @@ function UsersAdmin() {
       setLoading(false);
     }
   };
+  const backupFileStamp = () => new Date().toISOString().replace(/[:.]/g, "-");
+  const downloadDataBackup = async () => {
+    setBackupLoading(true);
+    setMessage("");
+    try {
+      const tables = [
+        "audit_allowed_users", "audit_profiles", "audit_units", "audit_documents",
+        "audit_checklists", "audit_document_imports", "audit_records", "audits",
+        "audit_answers", "audit_photos",
+      ] as const;
+      const results = await Promise.all(tables.map(async (table) => {
+        const { data, error } = await supabase.from(table).select("*");
+        if (error) throw new Error(`${table}: ${error.message}`);
+        return [table, data ?? []] as const;
+      }));
+      const backup = {
+        formatVersion: 1,
+        generatedAt: new Date().toISOString(),
+        project: "auditflow-platform",
+        projectId: "akexwgzlreorfmhgvrnz",
+        tables: Object.fromEntries(results),
+        note: "Backup lógico dos dados da aplicação. A estrutura do banco é versionada pelas migrações do projeto.",
+      };
+      saveAs(
+        new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" }),
+        `backup-dados-auditorias-${backupFileStamp()}.json`,
+      );
+      setMessage("Backup dos dados gerado. Guarde o arquivo fora do Supabase.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível gerar o backup dos dados.");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+  const downloadEvidenceBackup = async () => {
+    setBackupLoading(true);
+    setMessage("");
+    try {
+      const { data, error } = await supabase.from("audit_records").select("id,data");
+      if (error) throw error;
+      const records = (data ?? []) as Array<{
+        id: string;
+        data: { answers?: Array<{ photos?: string[] }> };
+      }>;
+      const paths = [...new Set(records.flatMap((record) =>
+        (record.data.answers ?? []).flatMap((answer) =>
+          (answer.photos ?? [])
+            .filter((photo) => photo.startsWith("storage:"))
+            .map((photo) => photo.replace(/^storage:/, "")),
+        ),
+      ))];
+      const zip = new JSZip();
+      const manifest: Array<{ path: string; backedUp: boolean; error?: string }> = [];
+      for (const path of paths) {
+        const { data: file, error: fileError } = await supabase.storage.from("audit-evidence").download(path);
+        if (fileError) {
+          manifest.push({ path, backedUp: false, error: fileError.message });
+        } else {
+          zip.file(path, file);
+          manifest.push({ path, backedUp: true });
+        }
+      }
+      zip.file("manifesto-evidencias.json", JSON.stringify({ generatedAt: new Date().toISOString(), files: manifest }, null, 2));
+      const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+      saveAs(blob, `backup-evidencias-auditorias-${backupFileStamp()}.zip`);
+      const failures = manifest.filter((item) => !item.backedUp).length;
+      setMessage(failures
+        ? `Backup de evidências gerado com ${failures} arquivo(s) não baixado(s); consulte o manifesto dentro do ZIP.`
+        : `Backup de evidências gerado com ${manifest.length} arquivo(s). Guarde o ZIP fora do Supabase.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível gerar o backup das evidências.");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
   return (
     <>
       <PageTitle title="Gerenciar usuários" subtitle="Área exclusiva do administrador do Sistema de Auditorias AFPESP." />
@@ -2415,6 +2495,19 @@ function UsersAdmin() {
           <button className="btn-primary self-end" disabled={loading || !fullName.trim() || !email.trim()} onClick={create}><Plus size={16} /> Criar usuário</button>
         </div>
         <p className="mt-3 text-xs text-slate-500">O novo usuário recebe a senha temporária AFPESP@1234 e deverá substituí-la no primeiro acesso.</p>
+      </div>
+      <div className="card mb-6 p-4 sm:p-5">
+        <h2 className="text-lg font-bold text-afpesp-700">Backup manual</h2>
+        <p className="mt-1 text-sm text-slate-500">Gere os dois arquivos e armazene-os fora do Supabase. Durante os testes, execute esta rotina diariamente e antes de alterações relevantes.</p>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <button className="btn-primary" disabled={backupLoading} onClick={downloadDataBackup}>
+            <FileDown size={16} /> Exportar dados completos (JSON)
+          </button>
+          <button className="btn-secondary" disabled={backupLoading} onClick={downloadEvidenceBackup}>
+            <ArchiveRestore size={16} /> Exportar imagens e evidências (ZIP)
+          </button>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">A exportação é exclusiva do administrador. O arquivo JSON contém auditorias, usuários autorizados, perfis, locais, checklists, documentos e registros relacionados.</p>
       </div>
       {message && <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
       <div className="card overflow-hidden p-0">
