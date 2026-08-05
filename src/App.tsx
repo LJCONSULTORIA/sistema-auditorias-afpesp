@@ -1066,6 +1066,12 @@ function AuditManagement({
       </div>
       {audits.length ? (
         <div className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
+        <div className="hidden bg-slate-50 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4">
+          <span>Local</span>
+          <span>Responsável</span>
+          <span>Data</span>
+          <span>Status</span>
+        </div>
         {pageAudits.map((a) => (
           <article key={a.id} className="bg-white">
             <button
@@ -1322,9 +1328,13 @@ function AuditForm() {
   const nav = useNavigate();
   const [auditorAtual, setAuditorAtual] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
+      if (!data.user) {
+        setProfileLoaded(true);
+        return;
+      }
       const { data: userProfile } = await supabase
         .from("audit_profiles")
         .select("full_name,role")
@@ -1332,6 +1342,7 @@ function AuditForm() {
         .single();
       if (userProfile?.full_name) setAuditorAtual(userProfile.full_name);
       setIsAdmin(userProfile?.role === "admin");
+      setProfileLoaded(true);
     });
   }, []);
   const locationType =
@@ -1361,7 +1372,16 @@ function AuditForm() {
   });
   const checklists = useRemoteChecklistsData(audit.locationType, audit.unit);
   const unselectedAuditors = availableAuditors.filter((auditor) => !audit.auditors.includes(auditor.name));
-  const readOnly = audit.status === "Finalizada";
+  const normalizeAuditorName = (name: string) => name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLocaleLowerCase("pt-BR");
+  const isAssignedAuditor = audit.auditors.some(
+    (name) => normalizeAuditorName(name) === normalizeAuditorName(auditorAtual),
+  );
+  const canManageAudit = !id || isAdmin || isAssignedAuditor;
+  const readOnly = audit.status === "Finalizada" || !canManageAudit;
   useEffect(() => {
     if (id) getRemoteAudit(id).then(setAudit).catch((error) => setError(error.message));
   }, [id]);
@@ -1452,6 +1472,8 @@ function AuditForm() {
     nav("/auditorias");
   };
   const save = async () => {
+    if (id && !canManageAudit)
+      return setError("Somente os auditores responsáveis ou o administrador podem alterar esta auditoria.");
     if (!audit.auditors.length || !audit.unit || !audit.checklistName || !audit.startDate || !audit.endDate)
       return setError("Informe ao menos um auditor responsável, o local, as datas de início e término e o checklist.");
     if (audit.endDate < audit.startDate)
@@ -1465,6 +1487,8 @@ function AuditForm() {
   };
   const startAudit = async () => {
     if (!id || audit.status !== "Programada") return;
+    if (!canManageAudit)
+      return setError("Somente os auditores responsáveis ou o administrador podem iniciar esta auditoria.");
     if (!audit.auditors.length || !audit.checklistName || !audit.startDate || !audit.endDate)
       return setError("Complete os auditores, o período e o checklist antes de iniciar a auditoria.");
     if (audit.endDate < audit.startDate)
@@ -1480,6 +1504,8 @@ function AuditForm() {
   };
   const finalizeAudit = async () => {
     if (!id || audit.status !== "Em andamento") return;
+    if (!canManageAudit)
+      return setError("Somente os auditores responsáveis ou o administrador podem finalizar esta auditoria.");
     if (audit.answers.some((answer) => !answer.question.trim()))
       return setError("Preencha o texto de todas as questões antes de finalizar a auditoria.");
     const unanswered = audit.answers.filter((answer) => !answer.classification).length;
@@ -1585,19 +1611,19 @@ function AuditForm() {
                 Excluir auditoria
               </button>
             )}
-            {id && audit.status === "Programada" && (
+            {id && audit.status === "Programada" && profileLoaded && canManageAudit && (
               <button className="btn-primary" onClick={startAudit}>
                 <ClipboardCheck size={16} />
                 Iniciar auditoria
               </button>
             )}
-            {id && audit.status === "Em andamento" && (
+            {id && audit.status === "Em andamento" && profileLoaded && canManageAudit && (
               <button className="btn bg-blue-600 text-white hover:bg-blue-700" onClick={finalizeAudit}>
                 <ClipboardCheck size={16} />
                 Finalizar auditoria
               </button>
             )}
-            {audit.status !== "Finalizada" && (
+            {audit.status !== "Finalizada" && canManageAudit && (
             <button className="btn-primary" onClick={save}>
               <Save size={16} />
               Salvar
@@ -1612,6 +1638,7 @@ function AuditForm() {
             <Field label="Auditores responsáveis">
               <select
                 className="field"
+                disabled={!canManageAudit}
                 value=""
                 onChange={(event) => {
                   const name = event.target.value;
@@ -1633,6 +1660,7 @@ function AuditForm() {
                     <span className="truncate">{name}</span>
                     <button
                       type="button"
+                      disabled={!canManageAudit}
                       className="rounded-full p-0.5 hover:bg-afpesp-100"
                       title={`Remover ${name}`}
                       aria-label={`Remover ${name}`}
@@ -1655,6 +1683,7 @@ function AuditForm() {
                 <input
                   type="date"
                   className="field"
+                  disabled={!canManageAudit}
                   value={audit.startDate}
                   onChange={(e) => setAudit({ ...audit, startDate: e.target.value })}
                 />
@@ -1663,6 +1692,7 @@ function AuditForm() {
                 <input
                   type="date"
                   className="field"
+                  disabled={!canManageAudit}
                   min={audit.startDate || undefined}
                   value={audit.endDate}
                   onChange={(e) => setAudit({ ...audit, endDate: e.target.value })}
@@ -1676,6 +1706,7 @@ function AuditForm() {
               <label>
                 <input
                   type="radio"
+                  disabled={!canManageAudit}
                   checked={mode === "anterior"}
                   onChange={() => setMode("anterior")}
                 />{" "}
@@ -1684,6 +1715,7 @@ function AuditForm() {
               <label>
                 <input
                   type="radio"
+                  disabled={!canManageAudit}
                   checked={mode === "novo"}
                   onChange={() => setMode("novo")}
                 />{" "}
@@ -1695,6 +1727,7 @@ function AuditForm() {
             <div className="mt-3 flex min-w-0 gap-2">
               <select
                 className="field"
+                disabled={!canManageAudit}
                 value={audit.checklistId ?? ""}
                 onChange={(e) => {
                   const c = checklists.find((x) => String(x.id) === e.target.value);
@@ -1709,7 +1742,7 @@ function AuditForm() {
               <button
                 type="button"
                 className="btn border border-red-300 bg-red-50 px-3 text-red-700 hover:bg-red-100"
-                disabled={!audit.checklistId}
+                disabled={!audit.checklistId || !canManageAudit}
                 onClick={deleteChecklist}
                 title="Excluir checklist selecionado"
               >
@@ -1722,6 +1755,7 @@ function AuditForm() {
                 type="file"
                 accept=".xlsx,.xls"
                 className="field"
+                disabled={!canManageAudit}
                 onChange={(e) => upload(e.target.files?.[0])}
               />
               {audit.checklistName && (
@@ -1743,6 +1777,11 @@ function AuditForm() {
       {error && (
         <p className="my-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {error}
+        </p>
+      )}
+      {id && profileLoaded && !canManageAudit && audit.status !== "Finalizada" && (
+        <p className="my-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+          Esta auditoria está disponível somente para consulta. Apenas os auditores responsáveis ou o administrador podem reprogramar, iniciar ou alterar seu conteúdo.
         </p>
       )}
       {id && (
@@ -1775,7 +1814,7 @@ function AuditForm() {
                         Requisito: {ans.requirement || "Não informado"}
                       </div>
                     </div>
-                    {audit.status === "Em andamento" && (
+                    {audit.status === "Em andamento" && canManageAudit && (
                       <div className="flex shrink-0 gap-2">
                         <button
                           type="button"
@@ -1794,7 +1833,7 @@ function AuditForm() {
                       </div>
                     )}
                   </div>
-                  {editingQuestionId === ans.id && audit.status === "Em andamento" && (
+                  {editingQuestionId === ans.id && audit.status === "Em andamento" && canManageAudit && (
                     <div className="mt-4 grid gap-3 rounded-xl border border-afpesp-100 bg-afpesp-50/50 p-3 sm:grid-cols-2">
                       <Field label="Processo">
                         <input className="field" value={ans.process} onChange={(event) => update(i, { process: event.target.value })} />
@@ -1927,7 +1966,7 @@ function AuditForm() {
                 </div>
               )}
             </div>
-            {audit.status === "Em andamento" && (
+            {audit.status === "Em andamento" && canManageAudit && (
               <div className="flex items-center gap-3" aria-label={`Inserção após a questão ${i + 1}`}>
                 <div className="h-px flex-1 bg-slate-200" />
                 <button
@@ -1942,7 +1981,7 @@ function AuditForm() {
             )}
             </Fragment>
           ))}
-          {audit.status === "Em andamento" && audit.answers.length === 0 && (
+          {audit.status === "Em andamento" && canManageAudit && audit.answers.length === 0 && (
             <button type="button" className="btn-primary w-full sm:w-auto" onClick={() => addQuestion(-1)}>
               <Plus size={16} /> Incluir primeira questão
             </button>
