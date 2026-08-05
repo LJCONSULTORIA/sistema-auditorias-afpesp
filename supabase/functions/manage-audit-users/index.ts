@@ -136,13 +136,20 @@ Deno.serve(async (request: Request) => {
     if (payload.action === "delete") {
       if (payload.userId === authData.user.id)
         return response({ error: "O administrador não pode excluir a própria conta." }, 400);
+      const { data: allowedUser } = await admin
+        .from("audit_allowed_users")
+        .select("id")
+        .eq("auth_user_id", payload.userId)
+        .maybeSingle();
       const { error: deleteError } = await admin.auth.admin.deleteUser(payload.userId);
       if (deleteError) throw deleteError;
-      const { error: allowDeleteError } = await admin
-        .from("audit_allowed_users")
-        .delete()
-        .eq("auth_user_id", payload.userId);
-      if (allowDeleteError) throw allowDeleteError;
+      if (allowedUser?.id) {
+        const { error: allowDeleteError } = await admin
+          .from("audit_allowed_users")
+          .delete()
+          .eq("id", allowedUser.id);
+        if (allowDeleteError) throw allowDeleteError;
+      }
       return response({ success: true });
     }
 
