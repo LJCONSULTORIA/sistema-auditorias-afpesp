@@ -1311,6 +1311,7 @@ function AuditForm() {
     params.get("mode") === "novo" ? "novo" : "anterior",
   );
   const [error, setError] = useState("");
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [audit, setAudit] = useState<Audit>({
     locationType,
     unit: selectedUnit,
@@ -1422,6 +1423,8 @@ function AuditForm() {
       return setError("Informe ao menos um auditor responsável, o local, as datas de início e término e o checklist.");
     if (audit.endDate < audit.startDate)
       return setError("A data de término não pode ser anterior à data de início.");
+    if (audit.status === "Em andamento" && audit.answers.some((answer) => !answer.question.trim()))
+      return setError("Preencha o texto de todas as questões antes de salvar.");
     const data = { ...audit, updatedAt: new Date().toISOString() };
     const saved = await saveRemoteAudit({ ...data, id: id || data.id });
     notifyRemoteDataChanged();
@@ -1444,6 +1447,8 @@ function AuditForm() {
   };
   const finalizeAudit = async () => {
     if (!id || audit.status !== "Em andamento") return;
+    if (audit.answers.some((answer) => !answer.question.trim()))
+      return setError("Preencha o texto de todas as questões antes de finalizar a auditoria.");
     const unanswered = audit.answers.filter((answer) => !answer.classification).length;
     const warning = unanswered
       ? `Existem ${unanswered} questão(ões) sem classificação. Deseja finalizar mesmo assim?`
@@ -1463,6 +1468,39 @@ function AuditForm() {
       ...a,
       answers: a.answers.map((x, j) => (j === i ? { ...x, ...p } : x)),
     }));
+  const addQuestion = () => {
+    const questionId = Math.max(-1, ...audit.answers.map((answer) => answer.questionId)) + 1;
+    const newQuestion: Answer = {
+      id: crypto.randomUUID(),
+      questionId,
+      process: "",
+      requirement: "",
+      question: "",
+      documentType: "",
+      documentCode: "",
+      documentTitle: "",
+      documentVersion: "",
+      documents: [],
+      classification: null,
+      finding: "",
+      recommendation: "",
+      photos: [],
+    };
+    setAudit((current) => ({ ...current, answers: [...current.answers, newQuestion] }));
+    setEditingQuestionId(newQuestion.id);
+    setError("");
+  };
+  const deleteQuestion = (index: number) => {
+    if (!confirm(`Excluir a questão ${index + 1} desta auditoria? Esta ação será efetivada ao salvar.`)) return;
+    setAudit((current) => ({
+      ...current,
+      answers: current.answers
+        .filter((_, answerIndex) => answerIndex !== index)
+        .map((answer, answerIndex) => ({ ...answer, questionId: answerIndex })),
+    }));
+    setEditingQuestionId(null);
+    setError("");
+  };
   const photos = async (i: number, files: FileList | null) => {
     if (!files) return;
     const urls = await Promise.all(
@@ -1689,11 +1727,48 @@ function AuditForm() {
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-afpesp-600 text-sm font-bold text-white">
                   {i + 1}
                 </span>
-                <div className="min-w-0">
-                  <div className="break-words font-medium leading-relaxed">{ans.question}</div>
-                  <div className="mt-2 text-sm font-semibold text-afpesp-700">
-                    Requisito: {ans.requirement || "Não informado"}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="break-words font-medium leading-relaxed">{ans.question || "Nova questão — preencha o texto"}</div>
+                      <div className="mt-2 text-sm font-semibold text-afpesp-700">
+                        Requisito: {ans.requirement || "Não informado"}
+                      </div>
+                    </div>
+                    {audit.status === "Em andamento" && (
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          className="btn-secondary px-3 text-xs"
+                          onClick={() => setEditingQuestionId(editingQuestionId === ans.id ? null : ans.id)}
+                        >
+                          {editingQuestionId === ans.id ? "Fechar edição" : "Editar questão"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn bg-red-50 px-3 text-xs text-red-700 hover:bg-red-100"
+                          onClick={() => deleteQuestion(i)}
+                        >
+                          <Trash2 size={14} /> Excluir
+                        </button>
+                      </div>
+                    )}
                   </div>
+                  {editingQuestionId === ans.id && audit.status === "Em andamento" && (
+                    <div className="mt-4 grid gap-3 rounded-xl border border-afpesp-100 bg-afpesp-50/50 p-3 sm:grid-cols-2">
+                      <Field label="Processo">
+                        <input className="field" value={ans.process} onChange={(event) => update(i, { process: event.target.value })} />
+                      </Field>
+                      <Field label="Requisito">
+                        <input className="field" value={ans.requirement} onChange={(event) => update(i, { requirement: event.target.value })} />
+                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="Questão de auditoria">
+                          <textarea className="field min-h-24" value={ans.question} onChange={(event) => update(i, { question: event.target.value })} />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
                   {answerDocuments(ans).length > 0 && (
                     <div className="mt-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                       <div className="mb-1 font-semibold">Documentos aplicáveis:</div>
@@ -1813,6 +1888,11 @@ function AuditForm() {
               )}
             </div>
           ))}
+          {audit.status === "Em andamento" && (
+            <button type="button" className="btn-primary w-full sm:w-auto" onClick={addQuestion}>
+              <Plus size={16} /> Incluir nova questão
+            </button>
+          )}
           </>
           )}
         </div>
