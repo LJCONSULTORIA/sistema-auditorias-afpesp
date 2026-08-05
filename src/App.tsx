@@ -36,6 +36,7 @@ import {
 } from "chart.js";
 import type { Plugin } from "chart.js";
 import { Bar, Doughnut } from "react-chartjs-2";
+import type { Session } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { db, seed } from "./db";
 import type {
@@ -51,6 +52,7 @@ import type {
   Unit,
 } from "./types";
 import { exportDocx } from "./reports";
+import { supabase } from "./supabase";
 const valueLabelsPlugin: Plugin = {
   id: "valueLabels",
   afterDatasetsDraw(chart) {
@@ -104,19 +106,27 @@ const documentTypes = [
 ] as const;
 const today = () => new Date().toISOString().slice(0, 10);
 type LayoutMode = "web" | "mobile";
-const sessionKey = "AFPESP_AUDITOR_ATUAL";
 const layoutModeKey = "AFPESP_LAYOUT_MODE";
-const loggedAuditor = () => localStorage.getItem(sessionKey) || "";
+type UserRole = "admin" | "auditor";
+type UserProfile = {
+  id: string;
+  full_name: string;
+  role: UserRole;
+  active: boolean;
+  must_change_password: boolean;
+};
 const formatDate = (value: string) =>
   value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "—";
 function Layout({
   children,
   user,
+  role,
   mode,
   onLogout,
 }: {
   children: React.ReactNode;
   user: string;
+  role: UserRole;
   mode: LayoutMode;
   onLogout: () => void;
 }) {
@@ -124,6 +134,7 @@ function Layout({
     [BarChart3, "/", "Dashboard"],
     [ClipboardCheck, "/auditorias", "Auditorias"],
     [Building2, "/cadastros", "Cadastros"],
+    ...(role === "admin" ? [[Users, "/usuarios", "Usuários"]] as const : []),
   ] as const;
   return (
     <div className="min-h-screen">
@@ -178,21 +189,37 @@ function Layout({
     </div>
   );
 }
-function Login({ onLogin }: { onLogin: (name: string, mode: LayoutMode) => void }) {
-  const auditors =
-    useLiveQuery(() => db.auditors.filter((auditor) => auditor.active).toArray(), []) ??
-    [];
-  const [selected, setSelected] = useState("");
-  const [newName, setNewName] = useState("");
+function Login({ onLogin }: { onLogin: (mode: LayoutMode) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [layoutMode, setLayoutMode] = useState<LayoutMode | "">("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
   const enter = async () => {
-    let name = selected;
-    if (!name && newName.trim()) {
-      name = newName.trim();
-      if (!(await db.auditors.where("name").equals(name).count()))
-        await db.auditors.add({ name, role: "Auditor", active: true });
+    if (!email.trim() || !password || !layoutMode) return;
+    setLoading(true);
+    setMessage("");
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    setLoading(false);
+    if (error) {
+      setMessage("E-mail ou senha inválidos, ou usuário sem acesso ativo.");
+      return;
     }
-    if (name && layoutMode) onLogin(name, layoutMode);
+    onLogin(layoutMode);
+  };
+  const recover = async () => {
+    if (!email.trim()) {
+      setMessage("Informe seu e-mail para receber a redefinição de senha.");
+      return;
+    }
+    setLoading(true);
+    const redirectTo = `${window.location.origin}${import.meta.env.BASE_URL}`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
+    setLoading(false);
+    setMessage(error ? error.message : "Enviamos as instruções de redefinição para o e-mail informado.");
   };
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
@@ -222,48 +249,40 @@ function Login({ onLogin }: { onLogin: (name: string, mode: LayoutMode) => void 
           </div>
         </Field>
         <div className="my-5 border-t border-slate-200" />
-        {auditors.length > 0 && (
-          <Field label="Auditor cadastrado">
-            <select
-              className="field"
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              <option value="">Selecione seu nome</option>
-              {auditors.map((a) => (
-                <option key={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <div className="my-4 flex items-center gap-3 text-xs text-slate-400">
-          <span className="h-px flex-1 bg-slate-200" />
-          <span>
-            {auditors.length
-              ? "ou cadastre um novo auditor"
-              : "primeiro acesso"}
-          </span>
-          <span className="h-px flex-1 bg-slate-200" />
-        </div>
-        <Field label="Nome do auditor">
+        <Field label="E-mail">
           <input
+            type="email"
             className="field"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && enter()}
-            placeholder="Nome completo"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="nome@afpesp.org.br"
+            autoComplete="email"
           />
         </Field>
+        <div className="mt-4">
+        <Field label="Senha">
+          <input
+            type="password"
+            className="field"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && enter()}
+            placeholder="Digite sua senha"
+            autoComplete="current-password"
+          />
+        </Field>
+        </div>
+        {message && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">{message}</p>}
         <button
           className="btn-primary mt-5 w-full"
-          disabled={!layoutMode || (!selected && !newName.trim())}
+          disabled={loading || !layoutMode || !email.trim() || !password}
           onClick={enter}
         >
-          Acessar sistema
+          {loading ? "Aguarde..." : "Acessar sistema"}
         </button>
-        <p className="mt-4 text-center text-xs text-slate-400">
-          A identificação é armazenada localmente neste navegador.
-        </p>
+        <button type="button" className="mt-4 w-full text-center text-sm font-semibold text-afpesp-700" onClick={recover} disabled={loading}>
+          Esqueci minha senha
+        </button>
       </div>
     </div>
   );
@@ -1143,7 +1162,18 @@ function AuditForm() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const nav = useNavigate();
-  const auditorAtual = loggedAuditor();
+  const [auditorAtual, setAuditorAtual] = useState("");
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) return;
+      const { data: userProfile } = await supabase
+        .from("audit_profiles")
+        .select("full_name")
+        .eq("id", data.user.id)
+        .single();
+      if (userProfile?.full_name) setAuditorAtual(userProfile.full_name);
+    });
+  }, []);
   const locationType =
     (params.get("type") as LocationType) || "Unidade de Lazer";
   const selectedUnit = params.get("unit") || "";
@@ -1884,35 +1914,248 @@ function DocumentsRegistry() {
     </div>
   );
 }
+function PasswordChange({
+  required,
+  onComplete,
+}: {
+  required: boolean;
+  onComplete: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const save = async () => {
+    if (password.length < 8) {
+      setMessage("A nova senha deve possuir pelo menos 8 caracteres.");
+      return;
+    }
+    if (password !== confirmation) {
+      setMessage("A confirmação da senha não coincide.");
+      return;
+    }
+    if (password === "AFPESP@1234") {
+      setMessage("Escolha uma senha diferente da senha temporária.");
+      return;
+    }
+    setLoading(true);
+    setMessage("");
+    const { error: passwordError } = await supabase.auth.updateUser({ password });
+    if (passwordError) {
+      setLoading(false);
+      setMessage(passwordError.message);
+      return;
+    }
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    const { error: profileError } = userId
+      ? await supabase.from("audit_profiles").update({ must_change_password: false }).eq("id", userId)
+      : { error: new Error("Usuário não identificado.") };
+    setLoading(false);
+    if (profileError) {
+      setMessage(profileError.message);
+      return;
+    }
+    onComplete();
+  };
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+      <div className="card w-full max-w-md p-5 sm:p-8">
+        <h1 className="text-2xl font-bold text-afpesp-700">
+          {required ? "Crie sua nova senha" : "Redefinir senha"}
+        </h1>
+        <p className="mb-6 mt-2 text-sm text-slate-500">
+          {required
+            ? "Por segurança, substitua a senha temporária antes de acessar o sistema."
+            : "Informe uma nova senha para concluir a recuperação do acesso."}
+        </p>
+        <Field label="Nova senha">
+          <input className="field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+        </Field>
+        <div className="mt-4">
+          <Field label="Confirmar nova senha">
+            <input className="field" type="password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} autoComplete="new-password" />
+          </Field>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">Utilize pelo menos 8 caracteres e não reutilize a senha temporária.</p>
+        {message && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{message}</p>}
+        <button className="btn-primary mt-5 w-full" disabled={loading || !password || !confirmation} onClick={save}>
+          {loading ? "Salvando..." : "Salvar nova senha"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type ManagedUser = {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  active: boolean;
+  auth_user_id: string | null;
+  created_at: string;
+};
+
+function UsersAdmin() {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<UserRole>("auditor");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const invoke = async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke("manage-audit-users", { body });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    return data;
+  };
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const data = await invoke({ action: "list" });
+      setUsers(data.users ?? []);
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível consultar os usuários.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { refresh(); }, []);
+  const create = async () => {
+    if (!fullName.trim() || !email.trim()) return;
+    setLoading(true);
+    try {
+      await invoke({ action: "create", fullName: fullName.trim(), email: email.trim().toLowerCase(), role });
+      setFullName(""); setEmail(""); setRole("auditor");
+      setMessage("Usuário criado com a senha temporária AFPESP@1234.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível criar o usuário.");
+      setLoading(false);
+    }
+  };
+  const action = async (body: Record<string, unknown>, success: string) => {
+    setLoading(true);
+    try {
+      await invoke(body);
+      setMessage(success);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível concluir a operação.");
+      setLoading(false);
+    }
+  };
+  return (
+    <>
+      <PageTitle title="Gerenciar usuários" subtitle="Área exclusiva do administrador do Sistema de Auditorias AFPESP." />
+      <div className="card mb-6 p-4 sm:p-5">
+        <h2 className="mb-4 text-lg font-bold text-afpesp-700">Cadastrar novo usuário</h2>
+        <div className="grid gap-3 md:grid-cols-[1.5fr_1.2fr_.7fr_auto]">
+          <Field label="Nome completo"><input className="field" value={fullName} onChange={(e) => setFullName(e.target.value)} /></Field>
+          <Field label="E-mail"><input type="email" className="field" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+          <Field label="Perfil"><select className="field" value={role} onChange={(e) => setRole(e.target.value as UserRole)}><option value="auditor">Auditor</option><option value="admin">Administrador</option></select></Field>
+          <button className="btn-primary self-end" disabled={loading || !fullName.trim() || !email.trim()} onClick={create}><Plus size={16} /> Criar usuário</button>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">O novo usuário recebe a senha temporária AFPESP@1234 e deverá substituí-la no primeiro acesso.</p>
+      </div>
+      {message && <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
+      <div className="card overflow-hidden p-0">
+        <div className="border-b p-4 sm:p-5"><h2 className="text-lg font-bold text-afpesp-700">Usuários autorizados ({users.length})</h2></div>
+        <div className="divide-y">
+          {users.map((user) => (
+            <div key={user.id} className="grid gap-3 p-4 lg:grid-cols-[1.5fr_1.2fr_.6fr_.6fr_auto] lg:items-center">
+              <div><div className="font-bold text-slate-800">{user.full_name}</div><div className="text-sm text-slate-500">{user.email}</div></div>
+              <div className="text-sm"><span className="font-semibold">Conta:</span> {user.auth_user_id ? "Criada" : "Pendente"}</div>
+              <div className="text-sm font-semibold">{user.role === "admin" ? "Administrador" : "Auditor"}</div>
+              <div className={`text-sm font-bold ${user.active ? "text-green-600" : "text-red-600"}`}>{user.active ? "Ativo" : "Inativo"}</div>
+              <div className="flex flex-wrap gap-2">
+                {user.auth_user_id && <>
+                  <button className="btn-secondary px-3 text-xs" disabled={loading} onClick={() => action({ action: "reset_temporary_password", userId: user.auth_user_id }, `Senha temporária redefinida para ${user.full_name}.`)}>Redefinir senha</button>
+                  <button className="btn-secondary px-3 text-xs" disabled={loading} onClick={() => action({ action: "set_active", userId: user.auth_user_id, active: !user.active }, user.active ? "Usuário desativado." : "Usuário reativado.")}>{user.active ? "Desativar" : "Reativar"}</button>
+                  <button className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" disabled={loading} onClick={() => confirm(`Excluir o usuário ${user.full_name}?`) && action({ action: "delete", userId: user.auth_user_id }, "Usuário excluído.")}><Trash2 size={14} className="inline" /> Excluir</button>
+                </>}
+              </div>
+            </div>
+          ))}
+          {!users.length && <p className="p-5 text-sm text-slate-500">{loading ? "Carregando usuários..." : "Nenhum usuário encontrado."}</p>}
+        </div>
+      </div>
+    </>
+  );
+}
 export default function App() {
-  const [user, setUser] = useState(loggedAuditor());
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [layoutMode, setLayoutMode] = useState<LayoutMode | "">(
     () => (localStorage.getItem(layoutModeKey) as LayoutMode | null) ?? "",
   );
   useEffect(() => {
     seed();
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      if (!data.session) setAuthLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, currentSession) => {
+      setSession(currentSession);
+      if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
+      if (!currentSession) {
+        setProfile(null);
+        setAuthLoading(false);
+      }
+    });
+    return () => listener.subscription.unsubscribe();
   }, []);
-  const login = (name: string, mode: LayoutMode) => {
-    localStorage.setItem(sessionKey, name);
+  useEffect(() => {
+    if (!session?.user.id) return;
+    setAuthLoading(true);
+    supabase
+      .from("audit_profiles")
+      .select("id, full_name, role, active, must_change_password")
+      .eq("id", session.user.id)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data?.active) {
+          setProfile(null);
+          supabase.auth.signOut();
+        } else {
+          setProfile(data as UserProfile);
+        }
+        setAuthLoading(false);
+      });
+  }, [session?.user.id]);
+  const login = (mode: LayoutMode) => {
     localStorage.setItem(layoutModeKey, mode);
-    setUser(name);
     setLayoutMode(mode);
   };
-  const logout = () => {
-    localStorage.removeItem(sessionKey);
+  const logout = async () => {
+    await supabase.auth.signOut();
     localStorage.removeItem(layoutModeKey);
-    setUser("");
     setLayoutMode("");
+    setProfile(null);
   };
-  if (!user || !layoutMode) return <Login onLogin={login} />;
+  const passwordCompleted = () => {
+    setRecoveryMode(false);
+    setProfile((current) => current ? { ...current, must_change_password: false } : current);
+  };
+  if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm font-semibold text-afpesp-700">Carregando acesso...</div>;
+  if (!session) return <Login onLogin={login} />;
+  if (!profile) return <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 text-center text-sm text-red-700">Seu usuário não possui um perfil ativo no Sistema de Auditorias AFPESP.</div>;
+  if (profile.must_change_password || recoveryMode)
+    return <PasswordChange required={profile.must_change_password} onComplete={passwordCompleted} />;
+  if (!layoutMode) return <Login onLogin={login} />;
   return (
-    <Layout user={user} mode={layoutMode} onLogout={logout}>
+    <Layout user={profile.full_name} role={profile.role} mode={layoutMode} onLogout={logout}>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/auditorias" element={<AuditHub />} />
         <Route path="/auditorias/nova" element={<AuditForm />} />
         <Route path="/auditorias/:id" element={<AuditForm />} />
         <Route path="/cadastros" element={<Cadastros />} />
+        {profile.role === "admin" && <Route path="/usuarios" element={<UsersAdmin />} />}
       </Routes>
     </Layout>
   );
