@@ -15,8 +15,11 @@ import { saveAs } from "file-saver";
 import * as XLSX from "xlsx";
 import type { Answer, Audit, DocumentReference } from "./types";
 const clean = (v: string) => v || "Não informado";
-const dataUrlBytes = (url: string) =>
-  Uint8Array.from(atob(url.split(",")[1]), (c) => c.charCodeAt(0));
+const imageBytes = async (url: string) => {
+  if (url.startsWith("data:"))
+    return Uint8Array.from(atob(url.split(",")[1]), (c) => c.charCodeAt(0));
+  return new Uint8Array(await (await fetch(url)).arrayBuffer());
+};
 const documentsOf = (answer: Answer): DocumentReference[] =>
   answer.documents?.length
     ? answer.documents
@@ -106,7 +109,8 @@ export async function exportDocx(a: Audit) {
       }),
     );
   }
-  a.answers.forEach((ans, i) => {
+  for (let i = 0; i < a.answers.length; i += 1) {
+    const ans = a.answers[i];
     children.push(
       new Paragraph({
         text: `${i + 1}. ${ans.question}`,
@@ -160,12 +164,13 @@ export async function exportDocx(a: Audit) {
           ],
         }),
       );
-    ans.photos.forEach((p, j) =>
+    for (let j = 0; j < ans.photos.length; j += 1) {
+      const p = ans.photos[j];
       children.push(
         new Paragraph({
           children: [
             new ImageRun({
-              data: dataUrlBytes(p),
+              data: await imageBytes(p),
               transformation: { width: 500, height: 330 },
               type: p.includes("png") ? "png" : "jpg",
               altText: {
@@ -181,9 +186,9 @@ export async function exportDocx(a: Audit) {
           text: `Evidência fotográfica ${j + 1} — questão ${i + 1}`,
           alignment: AlignmentType.CENTER,
         }),
-      ),
-    );
-  });
+      );
+    }
+  }
   const blob = await Packer.toBlob(
     new Document({ sections: [{ properties: {}, children }] }),
   );
