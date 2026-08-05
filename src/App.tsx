@@ -1431,8 +1431,8 @@ function AuditForm() {
     nav("/auditorias");
   };
   const save = async () => {
-    if (!audit.auditors.length || !audit.auditors[0] || !audit.unit || !audit.checklistName || !audit.startDate)
-      return setError("Informe o auditor responsável, o local, a data e o checklist.");
+    if (!audit.auditors.length || !audit.unit || !audit.checklistName || !audit.startDate)
+      return setError("Informe ao menos um auditor responsável, o local, a data e o checklist.");
     const data = { ...audit, updatedAt: new Date().toISOString() };
     const saved = await saveRemoteAudit({ ...data, id: id || data.id });
     notifyRemoteDataChanged();
@@ -1540,15 +1540,50 @@ function AuditForm() {
       {!id && (
         <div className="card">
           <div className="grid gap-4">
-            <Field label="Auditor responsável">
-              <select
-                className="field"
-                value={audit.auditors[0] || ""}
-                onChange={(e) => setAudit({ ...audit, auditors: e.target.value ? [e.target.value] : [] })}
-              >
-                <option value="">Selecione o auditor</option>
-                {availableAuditors.map((auditor) => <option key={auditor.id}>{auditor.name}</option>)}
-              </select>
+            <Field label="Auditores responsáveis">
+              <div className="rounded-lg border border-slate-300 bg-white p-3">
+                <p className="mb-3 text-xs text-slate-500">
+                  Selecione um ou mais auditores para esta auditoria.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {availableAuditors.map((auditor) => {
+                    const selected = audit.auditors.includes(auditor.name);
+                    return (
+                      <label
+                        key={auditor.remoteId ?? auditor.id ?? auditor.name}
+                        className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm font-semibold transition ${
+                          selected
+                            ? "border-afpesp-500 bg-afpesp-50 text-afpesp-800"
+                            : "border-slate-200 text-slate-600 hover:border-afpesp-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-afpesp-600"
+                          checked={selected}
+                          onChange={() =>
+                            setAudit((current) => ({
+                              ...current,
+                              auditors: selected
+                                ? current.auditors.filter((name) => name !== auditor.name)
+                                : [...current.auditors, auditor.name],
+                            }))
+                          }
+                        />
+                        <span>{auditor.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {!availableAuditors.length && (
+                  <p className="text-sm text-slate-500">Nenhum auditor ativo disponível.</p>
+                )}
+                <p className="mt-3 text-xs font-semibold text-afpesp-700">
+                  {audit.auditors.length
+                    ? `${audit.auditors.length} auditor(es) selecionado(s)`
+                    : "Nenhum auditor selecionado"}
+                </p>
+              </div>
             </Field>
             <Field label="Data da auditoria">
               <input
