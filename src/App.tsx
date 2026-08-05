@@ -2273,6 +2273,9 @@ function UsersAdmin() {
                   <button className="btn-secondary px-3 text-xs" disabled={loading} onClick={() => action({ action: "set_active", userId: user.auth_user_id, active: !user.active }, user.active ? "Usuário desativado." : "Usuário reativado.")}>{user.active ? "Desativar" : "Reativar"}</button>
                   <button className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" disabled={loading} onClick={() => confirm(`Excluir o usuário ${user.full_name}?`) && action({ action: "delete", userId: user.auth_user_id }, "Usuário excluído.")}><Trash2 size={14} className="inline" /> Excluir</button>
                 </>}
+                {!user.auth_user_id && (
+                  <button className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" disabled={loading} onClick={() => confirm(`Excluir a autorização pendente de ${user.full_name}?`) && action({ action: "delete_pending", allowedUserId: user.id }, "Autorização pendente excluída.")}><Trash2 size={14} className="inline" /> Excluir</button>
+                )}
               </div>
             </div>
           ))}
