@@ -12,7 +12,8 @@ type UserAction =
   | { action: "update"; userId: string; fullName: string; role: "admin" | "auditor" }
   | { action: "set_active"; userId: string; active: boolean }
   | { action: "reset_temporary_password"; userId: string }
-  | { action: "delete"; userId: string };
+  | { action: "delete"; userId: string }
+  | { action: "delete_pending"; allowedUserId: string };
 
 const temporaryPassword = "AFPESP@1234";
 
@@ -150,6 +151,23 @@ Deno.serve(async (request: Request) => {
           .eq("id", allowedUser.id);
         if (allowDeleteError) throw allowDeleteError;
       }
+      return response({ success: true });
+    }
+
+    if (payload.action === "delete_pending") {
+      const { data: pendingUser, error: pendingError } = await admin
+        .from("audit_allowed_users")
+        .select("id, auth_user_id")
+        .eq("id", payload.allowedUserId)
+        .single();
+      if (pendingError) throw pendingError;
+      if (pendingUser.auth_user_id)
+        return response({ error: "Este usuário já possui uma conta criada." }, 400);
+      const { error } = await admin
+        .from("audit_allowed_users")
+        .delete()
+        .eq("id", pendingUser.id);
+      if (error) throw error;
       return response({ success: true });
     }
 
