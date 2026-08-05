@@ -852,7 +852,7 @@ function downloadAuditChecklistExcel(audit: Audit) {
   const safeUnit = audit.unit.replace(/[^a-zA-Z0-9À-ÿ_-]+/g, "_");
   XLSX.writeFile(workbook, `checklist_${safeUnit}_${audit.startDate}.xlsx`);
 }
-function AuditHub() {
+function AuditHub({ isAdmin }: { isAdmin: boolean }) {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
@@ -977,6 +977,7 @@ function AuditHub() {
         <AuditManagement
           audits={[...filtered].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))}
           onOpen={(id) => nav(`/auditorias/${id}`)}
+          isAdmin={isAdmin}
         />
       </>
     </>
@@ -985,9 +986,11 @@ function AuditHub() {
 function AuditManagement({
   audits,
   onOpen,
+  isAdmin,
 }: {
   audits: Audit[];
   onOpen: (id: number) => void;
+  isAdmin: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [rescheduleId, setRescheduleId] = useState<number | null>(null);
@@ -1074,13 +1077,16 @@ function AuditManagement({
                   Reprogramar
                 </button>
               )}
-              {a.status !== "Finalizada" && (
+              {(a.status !== "Finalizada" || isAdmin) && (
                 <button
                   type="button"
                   className="btn w-full bg-red-50 text-red-700 hover:bg-red-100 sm:w-auto"
                   onClick={(event) => {
                     event.stopPropagation();
-                    if (confirm(`Excluir esta auditoria ${a.status.toLowerCase()}? Esta ação não pode ser desfeita.`))
+                    const message = a.status === "Finalizada"
+                      ? "Excluir definitivamente esta auditoria finalizada? Esta ação não pode ser desfeita."
+                      : `Excluir esta auditoria ${a.status.toLowerCase()}? Esta ação não pode ser desfeita.`;
+                    if (confirm(message))
                       db.audits.delete(a.id!);
                   }}
                 >
@@ -2151,7 +2157,7 @@ export default function App() {
     <Layout user={profile.full_name} role={profile.role} mode={layoutMode} onLogout={logout}>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/auditorias" element={<AuditHub />} />
+        <Route path="/auditorias" element={<AuditHub isAdmin={profile.role === "admin"} />} />
         <Route path="/auditorias/nova" element={<AuditForm />} />
         <Route path="/auditorias/:id" element={<AuditForm />} />
         <Route path="/cadastros" element={<Cadastros />} />
