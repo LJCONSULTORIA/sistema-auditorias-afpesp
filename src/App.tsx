@@ -526,7 +526,12 @@ function HomePage() {
       )
     : [];
   const resultLocations = [...new Set(selectedAnswers.map(({ audit }) => audit.unit))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  const resultRequirements = [...new Set(selectedAnswers.map(({ answer }) => answer.requirement || "Não informado"))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const resultRequirements = [...new Set(
+    selectedAnswers.flatMap(({ answer }) => {
+      const separated = splitApplicableRequirements(answer.requirement);
+      return separated.length ? separated : ["Não informado"];
+    }),
+  )].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
   return (
     <>
       <PageTitle
@@ -743,7 +748,9 @@ function HomePage() {
                   backgroundColor: "#ef4444",
                   borderRadius: 10,
                   borderSkipped: false,
-                  maxBarThickness: 64,
+                  categoryPercentage: 0.58,
+                  barPercentage: 0.48,
+                  maxBarThickness: 28,
                 },
               ],
             }}
@@ -776,6 +783,10 @@ function ResultAnalysis({
     "Oportunidade de Melhoria": "#38bdf8",
     Risco: "#facc15",
   }[classification];
+  const requirementOccurrences = records.flatMap(({ answer }) => {
+    const separated = splitApplicableRequirements(answer.requirement);
+    return separated.length ? separated : ["Não informado"];
+  });
   return (
     <section className="card my-6 border-afpesp-200 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -807,17 +818,50 @@ function ResultAnalysis({
           </div>
           <div className="rounded-xl border border-slate-200 p-4">
             <h3 className="font-bold text-slate-800">Consolidação por requisito</h3>
-            <p className="mb-3 text-sm text-slate-500">Quantidade agrupada pelo requisito aplicável.</p>
-            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-              {requirements.map((requirement) => {
-                const total = records.filter(({ answer }) => (answer.requirement || "Não informado") === requirement).length;
-                return (
-                  <div key={requirement} className="flex items-center justify-between gap-4 rounded-lg bg-slate-50 px-3 py-2">
-                    <span className="min-w-0 break-words text-sm font-medium text-slate-700">{requirement}</span>
-                    <span className="shrink-0 rounded-full bg-afpesp-100 px-2.5 py-1 text-xs font-bold text-afpesp-800">{total}</span>
-                  </div>
-                );
-              })}
+            <p className="mb-3 text-sm text-slate-500">Cada requisito aplicável é apresentado separadamente.</p>
+            <div className="overflow-x-auto pb-2">
+              <div className="h-72" style={{ minWidth: `${Math.max(520, requirements.length * 54)}px` }}>
+                <Bar
+                  data={{
+                    labels: requirements,
+                    datasets: [{
+                      label: classification,
+                      data: requirements.map((requirement) =>
+                        requirementOccurrences.filter((item) => item === requirement).length,
+                      ),
+                      backgroundColor: color,
+                      borderRadius: 6,
+                      borderSkipped: false,
+                      categoryPercentage: 0.55,
+                      barPercentage: 0.45,
+                      maxBarThickness: 24,
+                    }],
+                  }}
+                  options={{
+                    maintainAspectRatio: false,
+                    layout: { padding: { top: 18, left: 4, right: 4 } },
+                    plugins: { legend: { display: false }, tooltip: { enabled: true } },
+                    scales: {
+                      x: {
+                        offset: true,
+                        grid: { display: false },
+                        ticks: { autoSkip: false, maxRotation: 0, minRotation: 0, padding: 8, font: { size: 10 } },
+                      },
+                      y: {
+                        beginAtZero: true,
+                        suggestedMax: Math.max(
+                          1,
+                          ...requirements.map((requirement) =>
+                            requirementOccurrences.filter((item) => item === requirement).length,
+                          ),
+                        ) + 1,
+                        ticks: { precision: 0, stepSize: 1 },
+                        grid: { color: "#e2e8f0" },
+                      },
+                    },
+                  }}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -877,6 +921,11 @@ function Dashboard() {
                     (r) => nonConformityRequirements.filter((requirement) => requirement === r).length,
                   ),
                   backgroundColor: "#dc2626",
+                  borderRadius: 6,
+                  borderSkipped: false,
+                  categoryPercentage: 0.58,
+                  barPercentage: 0.48,
+                  maxBarThickness: 28,
                 },
               ],
             }}
