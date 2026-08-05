@@ -63,12 +63,17 @@ const valueLabelsPlugin: Plugin = {
       const meta = chart.getDatasetMeta(datasetIndex);
       meta.data.forEach((element, index) => {
         const value = Number(dataset.data[index] ?? 0);
-        if (!value) return;
+        const isBar = meta.type === "bar";
+        if (!value && !isBar) return;
         const position = element.tooltipPosition(true);
         if (position.x == null || position.y == null) return;
-        const isBar = meta.type === "bar";
         ctx.fillStyle = isBar ? "#0b2447" : "#ffffff";
-        ctx.fillText(String(value), position.x, isBar ? position.y - 10 : position.y);
+        const labelY = isBar
+          ? value === 0
+            ? chart.chartArea.bottom - 12
+            : Math.max(position.y - 12, chart.chartArea.top + 12)
+          : position.y;
+        ctx.fillText(String(value), position.x, labelY);
       });
     });
     ctx.restore();
@@ -554,9 +559,35 @@ function HomePage() {
           <div className="h-72"><Bar
             data={{
               labels: ["Programadas", "Em andamento", "Finalizadas"],
-              datasets: [{ label: "Auditorias", data: statusCounts, backgroundColor: ["#3b82f6", "#f59e0b", "#0b2447"], borderRadius: 10, borderSkipped: false, maxBarThickness: 70 }],
+              datasets: [{
+                label: "Auditorias",
+                data: statusCounts,
+                backgroundColor: ["#3b82f6", "#f59e0b", "#0b2447"],
+                borderRadius: 10,
+                borderSkipped: false,
+                categoryPercentage: 0.72,
+                barPercentage: 0.68,
+                maxBarThickness: 58,
+              }],
             }}
-            options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#e2e8f0" } } } }}
+            options={{
+              maintainAspectRatio: false,
+              layout: { padding: { top: 18, right: 4, left: 4 } },
+              plugins: { legend: { display: false }, tooltip: { enabled: true } },
+              scales: {
+                x: {
+                  offset: true,
+                  grid: { display: false },
+                  ticks: { autoSkip: false, maxRotation: 0, minRotation: 0, padding: 8, font: { size: 11 } },
+                },
+                y: {
+                  beginAtZero: true,
+                  suggestedMax: Math.max(1, ...statusCounts) + 1,
+                  ticks: { precision: 0, stepSize: 1 },
+                  grid: { color: "#e2e8f0" },
+                },
+              },
+            }}
           /></div>
         </div>
         <div className="card p-4 sm:p-5">
