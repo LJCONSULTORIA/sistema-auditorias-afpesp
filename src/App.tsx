@@ -324,6 +324,46 @@ function Stat({
     <div className="card flex min-h-28 flex-col items-center justify-center gap-2 p-3 text-center sm:min-h-36 sm:gap-3 sm:p-4">{content}</div>
   );
 }
+function AuditStatusDoughnut({
+  title,
+  subtitle,
+  counts,
+}: {
+  title: string;
+  subtitle: string;
+  counts: number[];
+}) {
+  const labels = ["Finalizadas", "Em andamento", "Programadas"];
+  const colors = ["#0b2447", "#f59e0b", "#3b82f6"];
+  return (
+    <div className="card p-4 sm:p-5">
+      <h2 className="text-xl font-bold text-afpesp-700">{title}</h2>
+      <p className="mb-3 text-sm text-slate-500">{subtitle}</p>
+      <div className="h-64 sm:h-72">
+        <Doughnut
+          data={{
+            labels,
+            datasets: [{ data: counts, backgroundColor: colors, borderWidth: 0, hoverOffset: 8 }],
+          }}
+          options={{
+            maintainAspectRatio: false,
+            cutout: "68%",
+            plugins: { legend: { display: false } },
+          }}
+        />
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {labels.map((label, index) => (
+          <div key={label} className="min-w-0 rounded-lg bg-slate-50 p-2 text-center">
+            <div className="mx-auto mb-1 h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[index] }} />
+            <div className="text-lg font-bold text-slate-800">{counts[index]}</div>
+            <div className="break-words text-[10px] font-semibold leading-tight text-slate-500 sm:text-xs">{label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 function HomePage() {
   const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
   const units =
@@ -375,10 +415,13 @@ function HomePage() {
     filtered.filter((audit) => audit.status === "Em andamento").length,
     filtered.filter((audit) => audit.status === "Finalizada").length,
   ];
-  const locationCounts = [
-    filtered.filter((audit) => audit.locationType === "Sede Social").length,
-    filtered.filter((audit) => audit.locationType === "Unidade de Lazer").length,
+  const statusCountsByType = (locationType: LocationType) => [
+    filtered.filter((audit) => audit.locationType === locationType && audit.status === "Finalizada").length,
+    filtered.filter((audit) => audit.locationType === locationType && audit.status === "Em andamento").length,
+    filtered.filter((audit) => audit.locationType === locationType && audit.status === "Programada").length,
   ];
+  const headOfficeStatusCounts = statusCountsByType("Sede Social");
+  const leisureStatusCounts = statusCountsByType("Unidade de Lazer");
   const selectedAnswers = selectedResult
     ? filtered.flatMap((audit) =>
         audit.answers
@@ -534,21 +577,16 @@ function HomePage() {
             options={{ maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom", labels: { usePointStyle: true, padding: 18 } } } }}
           /></div>
         </div>
-        <div className="card p-4 sm:p-5">
-          <h2 className="text-xl font-bold text-afpesp-700">
-            Auditorias por tipo de local
-          </h2>
-          <p className="mb-4 text-sm text-slate-500">
-            Quantidade de auditorias da Sede Social e das Unidades de Lazer.
-          </p>
-          <div className="h-72"><Doughnut
-            data={{
-              labels: ["Sede Social", "Unidade de Lazer"],
-              datasets: [{ data: locationCounts, backgroundColor: ["#0b2447", "#38bdf8"], borderWidth: 0, hoverOffset: 8 }],
-            }}
-            options={{ maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom", labels: { usePointStyle: true, padding: 18 } } } }}
-          /></div>
-        </div>
+        <AuditStatusDoughnut
+          title="Auditorias — Sede Social"
+          subtitle="Situação das auditorias dos setores da Sede Social."
+          counts={headOfficeStatusCounts}
+        />
+        <AuditStatusDoughnut
+          title="Auditorias — Unidades de Lazer"
+          subtitle="Situação das auditorias das Unidades de Lazer."
+          counts={leisureStatusCounts}
+        />
         <div className="card p-4 sm:p-5">
           <h2 className="text-xl font-bold text-afpesp-700">
             Auditorias por situação
