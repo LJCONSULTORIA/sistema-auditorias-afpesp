@@ -4,12 +4,14 @@ export type LocationType = "Unidade de Lazer" | "Sede Social";
 export type AuditStatus = "Programada" | "Em andamento" | "Finalizada";
 export interface Unit {
   id?: number;
+  remoteId?: string;
   name: string;
   type: LocationType;
   active: boolean;
 }
 export interface Auditor {
   id?: number;
+  remoteId?: string;
   name: string;
   role: string;
   active: boolean;
@@ -39,6 +41,7 @@ export interface DocumentReference {
 }
 export interface RegisteredDocument extends DocumentReference {
   id?: number;
+  remoteId?: string;
   active: boolean;
 }
 export interface Checklist {
