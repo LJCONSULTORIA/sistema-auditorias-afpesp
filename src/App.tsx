@@ -900,7 +900,8 @@ function downloadAuditChecklistExcel(audit: Audit) {
     "Nº": index + 1,
     "Tipo de local": audit.locationType,
     "Local / Setor": audit.unit,
-    "Data da auditoria": formatDate(audit.startDate),
+    "Data inicial": formatDate(audit.startDate),
+    "Data final": formatDate(audit.endDate),
     Auditor: audit.auditors.join(", ") || "Não identificado",
     Processo: answer.process,
     "Questão de auditoria": answer.question,
@@ -915,7 +916,7 @@ function downloadAuditChecklistExcel(audit: Audit) {
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(rows);
   worksheet["!cols"] = [
-    { wch: 6 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 24 },
+    { wch: 6 }, { wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 18 }, { wch: 24 },
     { wch: 30 }, { wch: 80 }, { wch: 22 }, { wch: 24 }, { wch: 55 },
     { wch: 55 }, { wch: 70 },
   ];
@@ -1051,15 +1052,6 @@ function AuditManagement({
   isAdmin: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<number | string | null>(null);
-  const [rescheduleId, setRescheduleId] = useState<number | string | null>(null);
-  const [rescheduleDate, setRescheduleDate] = useState("");
-  const confirmReschedule = async (audit: Audit) => {
-    if (!audit.id || !rescheduleDate) return;
-    await saveRemoteAudit({ ...audit, startDate: rescheduleDate, updatedAt: new Date().toISOString() });
-    notifyRemoteDataChanged();
-    setRescheduleId(null);
-    setRescheduleDate("");
-  };
   return (
     <section className="card p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -1084,7 +1076,9 @@ function AuditManagement({
                 <div className="truncate text-sm text-slate-500">{a.checklistName || "Checklist não identificado"}</div>
               </div>
               <div className="text-sm text-slate-600"><span className="sm:hidden">Auditor: </span>{a.auditors.join(", ") || "Não identificado"}</div>
-              <div className="text-sm font-semibold text-slate-700">{formatDate(a.startDate)}</div>
+              <div className="text-sm font-semibold text-slate-700">
+                {formatDate(a.startDate)}{a.endDate ? ` a ${formatDate(a.endDate)}` : ""}
+              </div>
               <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-afpesp-50 text-afpesp-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
                 {a.status}
               </span>
@@ -1102,7 +1096,7 @@ function AuditManagement({
                 className="btn-primary w-full sm:w-auto"
                 onClick={(event) => { event.stopPropagation(); onOpen(a.id!); }}
               >
-                {a.status === "Finalizada" ? "Abrir auditoria" : a.status === "Em andamento" ? "Continuar auditoria" : "Iniciar auditoria"}
+                {a.status === "Finalizada" ? "Abrir auditoria" : a.status === "Em andamento" ? "Continuar auditoria" : "Editar programação"}
               </button>
               <button
                 type="button"
@@ -1118,19 +1112,6 @@ function AuditManagement({
                   onClick={(event) => { event.stopPropagation(); exportDocx(a); }}
                 >
                   <Download size={16} /> Baixar relatório Word
-                </button>
-              )}
-              {a.status === "Programada" && (
-                <button
-                  type="button"
-                  className="btn-secondary w-full sm:w-auto"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setRescheduleId(a.id!);
-                    setRescheduleDate(a.startDate);
-                  }}
-                >
-                  Reprogramar
                 </button>
               )}
               {(a.status !== "Finalizada" || isAdmin) && (
@@ -1150,15 +1131,6 @@ function AuditManagement({
                 </button>
               )}
               </div>
-              {rescheduleId === a.id && (
-                <div className="mt-3 flex flex-col gap-2 rounded-lg border border-afpesp-100 bg-white p-3 sm:flex-row sm:items-end">
-                  <Field label="Nova data da auditoria">
-                    <input type="date" className="field" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
-                  </Field>
-                  <button className="btn-primary" disabled={!rescheduleDate} onClick={() => confirmReschedule(a)}>Confirmar nova data</button>
-                  <button className="btn-secondary" onClick={() => { setRescheduleId(null); setRescheduleDate(""); }}>Cancelar</button>
-                </div>
-              )}
             </div>
             )}
           </article>
@@ -1333,7 +1305,6 @@ function AuditForm() {
     (params.get("type") as LocationType) || "Unidade de Lazer";
   const selectedUnit = params.get("unit") || "";
   const requestedChecklistId = params.get("checklistId") || "";
-  const checklists = useRemoteChecklistsData(locationType, selectedUnit);
   const registeredDocuments = useRemoteDocuments().filter((document) => document.active);
   const availableAuditors = useRemoteAuditors().filter((auditor) => auditor.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const [mode, setMode] = useState<"anterior" | "novo">(
@@ -1354,6 +1325,8 @@ function AuditForm() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
+  const checklists = useRemoteChecklistsData(audit.locationType, audit.unit);
+  const unselectedAuditors = availableAuditors.filter((auditor) => !audit.auditors.includes(auditor.name));
   const readOnly = audit.status === "Finalizada";
   useEffect(() => {
     if (id) getRemoteAudit(id).then(setAudit).catch((error) => setError(error.message));
@@ -1380,6 +1353,15 @@ function AuditForm() {
         photos: [],
       })),
     }));
+  const replaceChecklist = (c: Checklist) => {
+    if (String(audit.checklistId ?? "") === String(c.id ?? "")) return;
+    if (
+      audit.checklistName &&
+      audit.answers.length &&
+      !confirm("Trocar o checklist substituirá todas as questões atualmente vinculadas a esta auditoria. Deseja continuar?")
+    ) return;
+    fromChecklist(c);
+  };
   useEffect(() => {
     if (id || !requestedChecklistId || audit.checklistId || !checklists.length)
       return;
@@ -1391,6 +1373,11 @@ function AuditForm() {
   }, [id, requestedChecklistId, audit.checklistId, checklists]);
   const upload = async (file?: File) => {
     if (!file) return;
+    if (
+      audit.checklistName &&
+      audit.answers.length &&
+      !confirm("Importar um novo checklist substituirá todas as questões atualmente vinculadas a esta auditoria. Deseja continuar?")
+    ) return;
     try {
       const items = await readChecklist(file);
       const name = file.name.replace(/\.xlsx?$/i, "");
@@ -1431,8 +1418,10 @@ function AuditForm() {
     nav("/auditorias");
   };
   const save = async () => {
-    if (!audit.auditors.length || !audit.unit || !audit.checklistName || !audit.startDate)
-      return setError("Informe ao menos um auditor responsável, o local, a data e o checklist.");
+    if (!audit.auditors.length || !audit.unit || !audit.checklistName || !audit.startDate || !audit.endDate)
+      return setError("Informe ao menos um auditor responsável, o local, as datas de início e término e o checklist.");
+    if (audit.endDate < audit.startDate)
+      return setError("A data de término não pode ser anterior à data de início.");
     const data = { ...audit, updatedAt: new Date().toISOString() };
     const saved = await saveRemoteAudit({ ...data, id: id || data.id });
     notifyRemoteDataChanged();
@@ -1440,6 +1429,10 @@ function AuditForm() {
   };
   const startAudit = async () => {
     if (!id || audit.status !== "Programada") return;
+    if (!audit.auditors.length || !audit.checklistName || !audit.startDate || !audit.endDate)
+      return setError("Complete os auditores, o período e o checklist antes de iniciar a auditoria.");
+    if (audit.endDate < audit.startDate)
+      return setError("A data de término não pode ser anterior à data de início.");
     const updated: Audit = {
       ...audit,
       status: "Em andamento",
@@ -1459,7 +1452,6 @@ function AuditForm() {
     const updated: Audit = {
       ...audit,
       status: "Finalizada",
-      endDate: today(),
       updatedAt: new Date().toISOString(),
     };
     await saveRemoteAudit({ ...updated, id });
@@ -1528,7 +1520,7 @@ function AuditForm() {
                 Finalizar auditoria
               </button>
             )}
-            {(!id || audit.status === "Em andamento") && (
+            {audit.status !== "Finalizada" && (
             <button className="btn-primary" onClick={save}>
               <Save size={16} />
               Salvar
@@ -1537,67 +1529,69 @@ function AuditForm() {
           </div>
         }
       />
-      {!id && (
+      {(!id || audit.status === "Programada") && (
         <div className="card">
           <div className="grid gap-4">
             <Field label="Auditores responsáveis">
-              <div className="rounded-lg border border-slate-300 bg-white p-3">
-                <p className="mb-3 text-xs text-slate-500">
-                  Selecione um ou mais auditores para esta auditoria.
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {availableAuditors.map((auditor) => {
-                    const selected = audit.auditors.includes(auditor.name);
-                    return (
-                      <label
-                        key={auditor.remoteId ?? auditor.id ?? auditor.name}
-                        className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm font-semibold transition ${
-                          selected
-                            ? "border-afpesp-500 bg-afpesp-50 text-afpesp-800"
-                            : "border-slate-200 text-slate-600 hover:border-afpesp-300"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 accent-afpesp-600"
-                          checked={selected}
-                          onChange={() =>
-                            setAudit((current) => ({
-                              ...current,
-                              auditors: selected
-                                ? current.auditors.filter((name) => name !== auditor.name)
-                                : [...current.auditors, auditor.name],
-                            }))
-                          }
-                        />
-                        <span>{auditor.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-                {!availableAuditors.length && (
-                  <p className="text-sm text-slate-500">Nenhum auditor ativo disponível.</p>
+              <select
+                className="field"
+                value=""
+                onChange={(event) => {
+                  const name = event.target.value;
+                  if (name) setAudit((current) => ({ ...current, auditors: [...current.auditors, name] }));
+                }}
+              >
+                <option value="">
+                  {unselectedAuditors.length ? "Selecione um auditor para adicionar" : "Todos os auditores disponíveis foram selecionados"}
+                </option>
+                {unselectedAuditors.map((auditor) => (
+                  <option key={auditor.remoteId ?? auditor.id ?? auditor.name} value={auditor.name}>
+                    {auditor.name}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 flex min-h-9 flex-wrap gap-2">
+                {audit.auditors.map((name) => (
+                  <span key={name} className="inline-flex max-w-full items-center gap-1 rounded-full bg-afpesp-50 px-3 py-1.5 text-sm font-semibold text-afpesp-800">
+                    <span className="truncate">{name}</span>
+                    <button
+                      type="button"
+                      className="rounded-full p-0.5 hover:bg-afpesp-100"
+                      title={`Remover ${name}`}
+                      aria-label={`Remover ${name}`}
+                      onClick={() => setAudit((current) => ({
+                        ...current,
+                        auditors: current.auditors.filter((auditor) => auditor !== name),
+                      }))}
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+                {!audit.auditors.length && (
+                  <span className="text-xs text-slate-500">Nenhum auditor selecionado.</span>
                 )}
-                <p className="mt-3 text-xs font-semibold text-afpesp-700">
-                  {audit.auditors.length
-                    ? `${audit.auditors.length} auditor(es) selecionado(s)`
-                    : "Nenhum auditor selecionado"}
-                </p>
               </div>
             </Field>
-            <Field label="Data da auditoria">
-              <input
-                type="date"
-                className="field"
-                value={audit.startDate}
-                onChange={(e) =>
-                  setAudit({
-                    ...audit,
-                    startDate: e.target.value,
-                  })
-                }
-              />
-            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Data de início">
+                <input
+                  type="date"
+                  className="field"
+                  value={audit.startDate}
+                  onChange={(e) => setAudit({ ...audit, startDate: e.target.value })}
+                />
+              </Field>
+              <Field label="Data de término">
+                <input
+                  type="date"
+                  className="field"
+                  min={audit.startDate || undefined}
+                  value={audit.endDate}
+                  onChange={(e) => setAudit({ ...audit, endDate: e.target.value })}
+                />
+              </Field>
+            </div>
           </div>
           <div className="mt-5">
             <span className="label">Checklist</span>
@@ -1627,7 +1621,7 @@ function AuditForm() {
                 value={audit.checklistId ?? ""}
                 onChange={(e) => {
                   const c = checklists.find((x) => String(x.id) === e.target.value);
-                  if (c) fromChecklist(c);
+                  if (c) replaceChecklist(c);
                 }}
               >
                 <option value="">Selecione um checklist</option>
@@ -1677,10 +1671,10 @@ function AuditForm() {
       {id && (
         <div className="mt-6 space-y-6">
           <div className="card grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div><span className="label">Auditor responsável</span><div className="font-semibold">{audit.auditors.join(", ") || auditorAtual}</div></div>
+            <div><span className="label">Auditores responsáveis</span><div className="font-semibold">{audit.auditors.join(", ") || auditorAtual}</div></div>
             <div><span className="label">Status</span><div className="font-semibold text-afpesp-700">{audit.status}</div></div>
-            <div><span className="label">Data programada</span><div className="font-semibold">{formatDate(audit.startDate)}</div></div>
-            <div><span className="label">Data de finalização</span><div className="font-semibold">{audit.status === "Finalizada" ? formatDate(audit.endDate) : "—"}</div></div>
+            <div><span className="label">Data de início</span><div className="font-semibold">{formatDate(audit.startDate)}</div></div>
+            <div><span className="label">Data de término</span><div className="font-semibold">{formatDate(audit.endDate)}</div></div>
           </div>
           {audit.status === "Programada" && (
             <div className="card text-center">
