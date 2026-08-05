@@ -907,8 +907,8 @@ function downloadAuditChecklistExcel(audit: Audit) {
     "Questão de auditoria": answer.question,
     "Requisito aplicável": answer.requirement,
     Classificação: answer.classification || "",
-    "Evidência / constatação": answer.finding,
-    Recomendação: answer.recommendation,
+    Descrição: answer.finding,
+    Evidência: answer.recommendation,
     "Documentos aplicáveis": (answer.documents ?? []).map((document) =>
       [document.type, document.code, document.title, document.version && `versão ${document.version}`].filter(Boolean).join(" — "),
     ).join(" | "),
@@ -1754,7 +1754,7 @@ function AuditForm() {
                   </div>
                 </div>
                 <div className="md:col-span-2">
-                <Field label="Evidência / constatação">
+                <Field label="Descrição">
                   <textarea
                     className="field min-h-24"
                     readOnly={readOnly}
@@ -1764,7 +1764,7 @@ function AuditForm() {
                 </Field>
                 </div>
                 <div className="md:col-span-2">
-                <Field label="Recomendação">
+                <Field label="Evidência">
                   <textarea
                     className="field min-h-24"
                     readOnly={readOnly}

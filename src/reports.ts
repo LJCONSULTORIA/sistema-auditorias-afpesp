@@ -150,7 +150,7 @@ export async function exportDocx(a: Audit) {
       }),
       new Paragraph({
         children: [
-          new TextRun({ text: "Evidência/constatação: ", bold: true }),
+          new TextRun({ text: "Descrição: ", bold: true }),
           new TextRun(clean(ans.finding)),
         ],
       }),
@@ -159,7 +159,7 @@ export async function exportDocx(a: Audit) {
       children.push(
         new Paragraph({
           children: [
-            new TextRun({ text: "Recomendação: ", bold: true }),
+            new TextRun({ text: "Evidência: ", bold: true }),
             new TextRun(ans.recommendation),
           ],
         }),
@@ -211,8 +211,8 @@ export function exportExcel(audits: Audit[]) {
       "Código do documento": documentsOf(x).map((document) => document.code).join("\n"),
       "Título do documento": documentsOf(x).map((document) => document.title).join("\n"),
       Versão: documentsOf(x).map((document) => document.version).join("\n"),
-      Constatação: x.finding,
-      Recomendação: x.recommendation,
+      Descrição: x.finding,
+      Evidência: x.recommendation,
     })),
   );
   const wb = XLSX.utils.book_new();
