@@ -45,7 +45,7 @@ export interface RegisteredDocument extends DocumentReference {
   active: boolean;
 }
 export interface Checklist {
-  id?: number;
+  id?: number | string;
   name: string;
   fileName: string;
   locationType: LocationType;
@@ -68,12 +68,13 @@ export interface Answer {
   finding: string;
   recommendation: string;
   photos: string[];
+  photoPaths?: string[];
 }
 export interface Audit {
-  id?: number;
+  id?: number | string;
   locationType: LocationType;
   unit: string;
-  checklistId?: number;
+  checklistId?: number | string;
   checklistName: string;
   auditors: string[];
   startDate: string;
