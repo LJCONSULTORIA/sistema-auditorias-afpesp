@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   Routes,
   Route,
@@ -1468,11 +1468,10 @@ function AuditForm() {
       ...a,
       answers: a.answers.map((x, j) => (j === i ? { ...x, ...p } : x)),
     }));
-  const addQuestion = () => {
-    const questionId = Math.max(-1, ...audit.answers.map((answer) => answer.questionId)) + 1;
+  const addQuestion = (afterIndex: number) => {
     const newQuestion: Answer = {
       id: crypto.randomUUID(),
-      questionId,
+      questionId: afterIndex + 1,
       process: "",
       requirement: "",
       question: "",
@@ -1486,7 +1485,14 @@ function AuditForm() {
       recommendation: "",
       photos: [],
     };
-    setAudit((current) => ({ ...current, answers: [...current.answers, newQuestion] }));
+    setAudit((current) => ({
+      ...current,
+      answers: [
+        ...current.answers.slice(0, afterIndex + 1),
+        newQuestion,
+        ...current.answers.slice(afterIndex + 1),
+      ].map((answer, answerIndex) => ({ ...answer, questionId: answerIndex })),
+    }));
     setEditingQuestionId(newQuestion.id);
     setError("");
   };
@@ -1722,7 +1728,8 @@ function AuditForm() {
           {audit.status !== "Programada" && (
           <>
           {audit.answers.map((ans, i) => (
-            <div className="card overflow-hidden" key={ans.id}>
+            <Fragment key={ans.id}>
+            <div className="card overflow-hidden">
               <div className="mb-5 flex gap-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-afpesp-600 text-sm font-bold text-white">
                   {i + 1}
@@ -1887,10 +1894,24 @@ function AuditForm() {
                 </div>
               )}
             </div>
+            {audit.status === "Em andamento" && (
+              <div className="flex items-center gap-3" aria-label={`Inserção após a questão ${i + 1}`}>
+                <div className="h-px flex-1 bg-slate-200" />
+                <button
+                  type="button"
+                  className="btn-secondary shrink-0 px-3 py-2 text-xs"
+                  onClick={() => addQuestion(i)}
+                >
+                  <Plus size={14} /> Inserir questão após a questão {i + 1}
+                </button>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+            )}
+            </Fragment>
           ))}
-          {audit.status === "Em andamento" && (
-            <button type="button" className="btn-primary w-full sm:w-auto" onClick={addQuestion}>
-              <Plus size={16} /> Incluir nova questão
+          {audit.status === "Em andamento" && audit.answers.length === 0 && (
+            <button type="button" className="btn-primary w-full sm:w-auto" onClick={() => addQuestion(-1)}>
+              <Plus size={16} /> Incluir primeira questão
             </button>
           )}
           </>
