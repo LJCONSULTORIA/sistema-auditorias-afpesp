@@ -1044,6 +1044,15 @@ function AuditManagement({
   isAdmin: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<number | string | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(audits.length / pageSize));
+  const auditListKey = audits.map((audit) => audit.id).join("|");
+  const pageAudits = audits.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => {
+    setPage(1);
+    setExpandedId(null);
+  }, [auditListKey]);
   return (
     <section className="card p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -1055,7 +1064,7 @@ function AuditManagement({
       </div>
       {audits.length ? (
         <div className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
-        {audits.map((a) => (
+        {pageAudits.map((a) => (
           <article key={a.id} className="bg-white">
             <button
               type="button"
@@ -1130,6 +1139,34 @@ function AuditManagement({
         </div>
       ) : (
         <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">Nenhuma auditoria corresponde aos filtros selecionados.</p>
+      )}
+      {audits.length > pageSize && (
+        <nav className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row" aria-label="Paginação da listagem de auditorias">
+          <p className="text-sm text-slate-500">
+            Exibindo {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, audits.length)} de {audits.length} auditorias
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-secondary px-3 py-2 text-sm"
+              disabled={page === 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Anterior
+            </button>
+            <span className="min-w-24 text-center text-sm font-semibold text-slate-700">
+              Página {page} de {totalPages}
+            </span>
+            <button
+              type="button"
+              className="btn-secondary px-3 py-2 text-sm"
+              disabled={page === totalPages}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+            >
+              Próxima
+            </button>
+          </div>
+        </nav>
       )}
     </section>
   );
