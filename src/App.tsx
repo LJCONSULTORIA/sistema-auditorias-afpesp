@@ -1390,6 +1390,7 @@ function AuditForm() {
     params.get("mode") === "novo" ? "novo" : "anterior",
   );
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [audit, setAudit] = useState<Audit>({
     locationType,
@@ -1507,18 +1508,33 @@ function AuditForm() {
     nav("/auditorias");
   };
   const save = async () => {
+    setSuccess("");
     if (id && !canManageAudit)
       return setError("Somente os auditores responsáveis ou o administrador podem alterar esta auditoria.");
-    if (!audit.auditors.length || !audit.unit || !audit.checklistName || !audit.startDate || !audit.endDate)
-      return setError("Informe ao menos um auditor responsável, o local, as datas de início e término e o checklist.");
+    const missingFields = [
+      !audit.auditors.length && "ao menos um auditor responsável",
+      !audit.unit && "o local",
+      !audit.startDate && "a data de início",
+      !audit.endDate && "a data de término",
+      !audit.checklistName && "o checklist",
+    ].filter(Boolean);
+    if (missingFields.length)
+      return setError(`Informe ${missingFields.join(", ")}.`);
     if (audit.endDate < audit.startDate)
       return setError("A data de término não pode ser anterior à data de início.");
     if (audit.status === "Em andamento" && audit.answers.some((answer) => !answer.question.trim()))
       return setError("Preencha o texto de todas as questões antes de salvar.");
-    const data = { ...audit, updatedAt: new Date().toISOString() };
-    const saved = await saveRemoteAudit({ ...data, id: id || data.id });
-    notifyRemoteDataChanged();
-    nav(`/auditorias/${saved}`);
+    setError("");
+    try {
+      const data = { ...audit, updatedAt: new Date().toISOString() };
+      const saved = await saveRemoteAudit({ ...data, id: id || data.id });
+      setAudit(data);
+      notifyRemoteDataChanged();
+      setSuccess(id ? "Reprogramação salva com sucesso." : "Auditoria salva com sucesso.");
+      nav(`/auditorias/${saved}`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a auditoria.");
+    }
   };
   const startAudit = async () => {
     if (!id || audit.status !== "Programada") return;
@@ -1812,6 +1828,11 @@ function AuditForm() {
       {error && (
         <p className="my-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {error}
+        </p>
+      )}
+      {success && (
+        <p className="my-4 rounded-lg bg-green-50 p-3 text-sm font-semibold text-green-700">
+          {success}
         </p>
       )}
       {id && profileLoaded && !canManageAudit && audit.status !== "Finalizada" && (
