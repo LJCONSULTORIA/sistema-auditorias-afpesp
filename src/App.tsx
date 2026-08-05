@@ -7,7 +7,6 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { useLiveQuery } from "dexie-react-hooks";
 import {
   ArchiveRestore,
   BarChart3,
@@ -38,7 +37,6 @@ import type { Plugin } from "chart.js";
 import { Bar, Doughnut } from "react-chartjs-2";
 import type { Session } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
-import { db, seed } from "./db";
 import type {
   Answer,
   Audit,
@@ -53,6 +51,10 @@ import type {
 } from "./types";
 import { exportDocx } from "./reports";
 import { supabase } from "./supabase";
+import {
+  createRemoteChecklist, deleteRemoteAudit, deleteRemoteChecklist, getRemoteAudit,
+  listRemoteAudits, listRemoteChecklists, saveRemoteAudit,
+} from "./auditRepository";
 const valueLabelsPlugin: Plugin = {
   id: "valueLabels",
   afterDatasetsDraw(chart) {
@@ -171,6 +173,20 @@ const useRemoteDocuments = () => useRemoteData<RegisteredDocument>("audit_docume
   version: String(row.version),
   active: Boolean(row.active),
 }));
+function useRemoteAuditsData() {
+  const [items, setItems] = useState<Audit[]>([]);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); return () => window.removeEventListener(remoteDataChangedEvent, refresh); }, []);
+  useEffect(() => { let active = true; listRemoteAudits().then((data) => active && setItems(data)).catch(console.error); return () => { active = false; }; }, [revision]);
+  return items;
+}
+function useRemoteChecklistsData(locationType?: LocationType, unit?: string) {
+  const [items, setItems] = useState<Checklist[]>([]);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); return () => window.removeEventListener(remoteDataChangedEvent, refresh); }, []);
+  useEffect(() => { let active = true; listRemoteChecklists(locationType, unit).then((data) => active && setItems(data)).catch(console.error); return () => { active = false; }; }, [locationType, unit, revision]);
+  return items;
+}
 const formatDate = (value: string) =>
   value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "—";
 function Layout({
@@ -440,7 +456,7 @@ function AuditStatusDoughnut({
   );
 }
 function HomePage() {
-  const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
+  const audits = useRemoteAuditsData();
   const units = useRemoteUnits().filter((item) => item.active);
   const nav = useNavigate();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
@@ -811,7 +827,7 @@ function ResultAnalysis({
   );
 }
 function Dashboard() {
-  const audits = useLiveQuery(() => db.audits.toArray(), []) ?? [];
+  const audits = useRemoteAuditsData();
   const answers = audits
     .filter((a) => a.status !== "Programada")
     .flatMap((a) => a.answers)
@@ -922,8 +938,7 @@ function AuditHub({ isAdmin }: { isAdmin: boolean }) {
       : "Todos",
   );
   const units = useRemoteUnits().filter((item) => item.active && (type === "Todos" || item.type === type));
-  const audits =
-    useLiveQuery<Audit[]>(() => db.audits.toArray(), []) ?? [];
+  const audits = useRemoteAuditsData();
   const auditors = useRemoteAuditors().filter((auditor) => auditor.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
@@ -1032,18 +1047,16 @@ function AuditManagement({
   isAdmin,
 }: {
   audits: Audit[];
-  onOpen: (id: number) => void;
+  onOpen: (id: number | string) => void;
   isAdmin: boolean;
 }) {
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [rescheduleId, setRescheduleId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | string | null>(null);
+  const [rescheduleId, setRescheduleId] = useState<number | string | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState("");
   const confirmReschedule = async (audit: Audit) => {
     if (!audit.id || !rescheduleDate) return;
-    await db.audits.update(audit.id, {
-      startDate: rescheduleDate,
-      updatedAt: new Date().toISOString(),
-    });
+    await saveRemoteAudit({ ...audit, startDate: rescheduleDate, updatedAt: new Date().toISOString() });
+    notifyRemoteDataChanged();
     setRescheduleId(null);
     setRescheduleDate("");
   };
@@ -1129,8 +1142,8 @@ function AuditManagement({
                     const message = a.status === "Finalizada"
                       ? "Excluir definitivamente esta auditoria finalizada? Esta ação não pode ser desfeita."
                       : `Excluir esta auditoria ${a.status.toLowerCase()}? Esta ação não pode ser desfeita.`;
-                    if (confirm(message))
-                      db.audits.delete(a.id!);
+                    if (confirm(message) && typeof a.id === "string")
+                      deleteRemoteAudit(a.id).then(notifyRemoteDataChanged).catch((error) => alert(error.message));
                   }}
                 >
                   <Trash2 size={16} /> Excluir
@@ -1319,20 +1332,8 @@ function AuditForm() {
   const locationType =
     (params.get("type") as LocationType) || "Unidade de Lazer";
   const selectedUnit = params.get("unit") || "";
-  const requestedChecklistId = Number(params.get("checklistId") || 0);
-  const checklists =
-    useLiveQuery(
-      () =>
-        db.checklists
-          .filter(
-            (c) =>
-              normalize(c.unit).replace(/^ul\s+/, "") ===
-                normalize(selectedUnit).replace(/^ul\s+/, "") &&
-              c.locationType === locationType,
-          )
-          .sortBy("createdAt"),
-      [selectedUnit, locationType],
-    ) ?? [];
+  const requestedChecklistId = params.get("checklistId") || "";
+  const checklists = useRemoteChecklistsData(locationType, selectedUnit);
   const registeredDocuments = useRemoteDocuments().filter((document) => document.active);
   const availableAuditors = useRemoteAuditors().filter((auditor) => auditor.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const [mode, setMode] = useState<"anterior" | "novo">(
@@ -1355,7 +1356,7 @@ function AuditForm() {
   });
   const readOnly = audit.status === "Finalizada";
   useEffect(() => {
-    if (id) db.audits.get(Number(id)).then((a) => a && setAudit(a));
+    if (id) getRemoteAudit(id).then(setAudit).catch((error) => setError(error.message));
   }, [id]);
   const fromChecklist = (c: Checklist) =>
     setAudit((a) => ({
@@ -1401,8 +1402,9 @@ function AuditForm() {
         items,
         createdAt: new Date().toISOString(),
       };
-      const cid = await db.checklists.add(checklist);
+      const cid = await createRemoteChecklist(checklist);
       fromChecklist({ ...checklist, id: cid });
+      notifyRemoteDataChanged();
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -1411,7 +1413,9 @@ function AuditForm() {
   const deleteChecklist = async () => {
     if (!audit.checklistId) return;
     if (!confirm("Excluir este checklist cadastrado? Esta ação não pode ser desfeita.")) return;
-    await db.checklists.delete(audit.checklistId);
+    if (typeof audit.checklistId !== "string") return;
+    await deleteRemoteChecklist(audit.checklistId);
+    notifyRemoteDataChanged();
     setAudit((current) => ({
       ...current,
       checklistId: undefined,
@@ -1422,16 +1426,16 @@ function AuditForm() {
   const deleteEditableAudit = async () => {
     if (!id || audit.status === "Finalizada") return;
     if (!confirm(`Excluir esta auditoria ${audit.status.toLowerCase()}? Esta ação não pode ser desfeita.`)) return;
-    await db.audits.delete(Number(id));
+    await deleteRemoteAudit(id);
+    notifyRemoteDataChanged();
     nav("/auditorias");
   };
   const save = async () => {
     if (!audit.auditors.length || !audit.auditors[0] || !audit.unit || !audit.checklistName || !audit.startDate)
       return setError("Informe o auditor responsável, o local, a data e o checklist.");
     const data = { ...audit, updatedAt: new Date().toISOString() };
-    const saved = id
-      ? (await db.audits.put({ ...data, id: Number(id) }), Number(id))
-      : await db.audits.add(data);
+    const saved = await saveRemoteAudit({ ...data, id: id || data.id });
+    notifyRemoteDataChanged();
     nav(`/auditorias/${saved}`);
   };
   const startAudit = async () => {
@@ -1441,7 +1445,8 @@ function AuditForm() {
       status: "Em andamento",
       updatedAt: new Date().toISOString(),
     };
-    await db.audits.put({ ...updated, id: Number(id) });
+    await saveRemoteAudit({ ...updated, id });
+    notifyRemoteDataChanged();
     setAudit(updated);
   };
   const finalizeAudit = async () => {
@@ -1457,7 +1462,8 @@ function AuditForm() {
       endDate: today(),
       updatedAt: new Date().toISOString(),
     };
-    await db.audits.put({ ...updated, id: Number(id) });
+    await saveRemoteAudit({ ...updated, id });
+    notifyRemoteDataChanged();
     setAudit(updated);
   };
   const update = (i: number, p: Partial<Answer>) =>
@@ -1585,7 +1591,7 @@ function AuditForm() {
                 className="field"
                 value={audit.checklistId ?? ""}
                 onChange={(e) => {
-                  const c = checklists.find((x) => x.id === Number(e.target.value));
+                  const c = checklists.find((x) => String(x.id) === e.target.value);
                   if (c) fromChecklist(c);
                 }}
               >
@@ -1766,6 +1772,7 @@ function AuditForm() {
                         onClick={() =>
                           update(i, {
                             photos: ans.photos.filter((_, k) => k !== j),
+                            photoPaths: ans.photoPaths?.filter((_, k) => k !== j),
                           })
                         }
                       >
@@ -2284,7 +2291,6 @@ export default function App() {
     () => (localStorage.getItem(layoutModeKey) as LayoutMode | null) ?? "",
   );
   useEffect(() => {
-    seed();
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       if (!data.session) setAuthLoading(false);
