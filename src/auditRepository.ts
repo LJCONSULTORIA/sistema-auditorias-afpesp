@@ -35,7 +35,19 @@ const dataUrlBlob = async (url: string) => (await fetch(url)).blob();
 export async function saveRemoteAudit(audit: Audit) {
   const uid = await userId();
   const id = typeof audit.id === "string" ? audit.id : crypto.randomUUID();
+  const previousPaths = new Set<string>();
+  if (typeof audit.id === "string") {
+    const { data, error } = await supabase.from("audit_records").select("data").eq("id", id).single();
+    if (error) throw error;
+    const previousAnswers = (data?.data as { answers?: Array<{ photos?: string[] }> } | null)?.answers ?? [];
+    previousAnswers.forEach((answer) =>
+      (answer.photos ?? [])
+        .filter((photo) => photo.startsWith("storage:"))
+        .forEach((photo) => previousPaths.add(photo.replace(/^storage:/, ""))),
+    );
+  }
   const answers: Answer[] = [];
+  const newlyUploadedPaths: string[] = [];
   for (const answer of audit.answers) {
     const paths: string[] = [];
     for (let index = 0; index < answer.photos.length; index += 1) {
@@ -48,6 +60,7 @@ export async function saveRemoteAudit(audit: Audit) {
       const { error } = await supabase.storage.from(bucket).upload(path, blob, { contentType: blob.type, upsert: false });
       if (error) throw error;
       paths.push(path);
+      newlyUploadedPaths.push(path);
     }
     answers.push({ ...answer, photos: paths.map((path) => `storage:${path}`), photoPaths: undefined });
   }
@@ -56,7 +69,18 @@ export async function saveRemoteAudit(audit: Audit) {
   const { error } = typeof audit.id === "string"
     ? await supabase.from("audit_records").update({ status: audit.status, data: stored, updated_at: now }).eq("id", id)
     : await supabase.from("audit_records").insert({ id, status: audit.status, data: stored, created_by: uid, updated_at: now });
-  if (error) throw error;
+  if (error) {
+    if (newlyUploadedPaths.length) await supabase.storage.from(bucket).remove(newlyUploadedPaths);
+    throw error;
+  }
+  const retainedPaths = new Set(
+    answers.flatMap((answer) => answer.photos.map((photo) => photo.replace(/^storage:/, ""))),
+  );
+  const removedPaths = [...previousPaths].filter((path) => !retainedPaths.has(path));
+  if (removedPaths.length) {
+    const { error: storageError } = await supabase.storage.from(bucket).remove(removedPaths);
+    if (storageError) console.error("Não foi possível remover evidências sem referência:", storageError.message);
+  }
   return id;
 }
 export async function deleteRemoteAudit(id: string) {
