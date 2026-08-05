@@ -918,7 +918,7 @@ function downloadAuditChecklistExcel(audit: Audit) {
   const safeUnit = audit.unit.replace(/[^a-zA-Z0-9À-ÿ_-]+/g, "_");
   XLSX.writeFile(workbook, `checklist_${safeUnit}_${audit.startDate}.xlsx`);
 }
-function AuditHub({ isAdmin }: { isAdmin: boolean }) {
+function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserName: string }) {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
@@ -1030,7 +1030,19 @@ function AuditHub({ isAdmin }: { isAdmin: boolean }) {
         <AuditManagement
           audits={[...filtered].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))}
           onOpen={(id) => nav(`/auditorias/${id}`)}
+          onStart={async (audit) => {
+            if (!audit.id || audit.status !== "Programada") return;
+            const updated: Audit = {
+              ...audit,
+              status: "Em andamento",
+              updatedAt: new Date().toISOString(),
+            };
+            await saveRemoteAudit(updated);
+            notifyRemoteDataChanged();
+            nav(`/auditorias/${audit.id}`);
+          }}
           isAdmin={isAdmin}
+          currentUserName={currentUserName}
         />
       </>
     </>
@@ -1039,11 +1051,15 @@ function AuditHub({ isAdmin }: { isAdmin: boolean }) {
 function AuditManagement({
   audits,
   onOpen,
+  onStart,
   isAdmin,
+  currentUserName,
 }: {
   audits: Audit[];
   onOpen: (id: number | string) => void;
+  onStart: (audit: Audit) => Promise<void>;
   isAdmin: boolean;
+  currentUserName: string;
 }) {
   const [expandedId, setExpandedId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
@@ -1051,6 +1067,8 @@ function AuditManagement({
   const totalPages = Math.max(1, Math.ceil(audits.length / pageSize));
   const auditListKey = audits.map((audit) => audit.id).join("|");
   const pageAudits = audits.slice((page - 1) * pageSize, page * pageSize);
+  const canManageAudit = (audit: Audit) =>
+    isAdmin || audit.auditors.some((auditor) => normalize(auditor) === normalize(currentUserName));
   useEffect(() => {
     setPage(1);
     setExpandedId(null);
@@ -1100,12 +1118,29 @@ function AuditManagement({
                 <div><span className="font-semibold text-slate-500">Situação:</span> {a.status}</div>
               </div>
               <div className="grid gap-2 sm:flex sm:flex-wrap">
+              {a.status === "Programada" && canManageAudit(a) && (
+                <button
+                  type="button"
+                  className="btn bg-blue-600 text-white hover:bg-blue-700 sm:w-auto"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (confirm("Iniciar esta auditoria agora?"))
+                      onStart(a).catch((error) => alert(error.message));
+                  }}
+                >
+                  <ClipboardCheck size={16} /> Iniciar auditoria
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-primary w-full sm:w-auto"
                 onClick={(event) => { event.stopPropagation(); onOpen(a.id!); }}
               >
-                {a.status === "Finalizada" ? "Abrir auditoria" : a.status === "Em andamento" ? "Continuar auditoria" : "Editar programação"}
+                {a.status === "Finalizada"
+                  ? "Abrir auditoria"
+                  : a.status === "Em andamento"
+                    ? canManageAudit(a) ? "Continuar auditoria" : "Consultar auditoria"
+                    : canManageAudit(a) ? "Editar programação" : "Consultar auditoria"}
               </button>
               <button
                 type="button"
@@ -2641,7 +2676,7 @@ export default function App() {
     <Layout user={profile.full_name} role={profile.role} mode={layoutMode} onLogout={logout}>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/auditorias" element={<AuditHub isAdmin={profile.role === "admin"} />} />
+        <Route path="/auditorias" element={<AuditHub isAdmin={profile.role === "admin"} currentUserName={profile.full_name} />} />
         <Route path="/auditorias/nova" element={<AuditForm />} />
         <Route path="/auditorias/:id" element={<AuditForm />} />
         <Route path="/cadastros" element={<Cadastros />} />
