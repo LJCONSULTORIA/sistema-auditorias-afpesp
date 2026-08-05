@@ -86,9 +86,12 @@ export async function saveRemoteAudit(audit: Audit) {
 export async function deleteRemoteAudit(id: string) {
   const audit = await getRemoteAudit(id);
   const paths = audit.answers.flatMap((answer) => answer.photoPaths ?? []);
-  if (paths.length) await supabase.storage.from(bucket).remove(paths);
   const { error } = await supabase.from("audit_records").delete().eq("id", id);
   if (error) throw error;
+  if (paths.length) {
+    const { error: storageError } = await supabase.storage.from(bucket).remove(paths);
+    if (storageError) console.error("Auditoria excluída, mas não foi possível remover todas as evidências:", storageError.message);
+  }
 }
 export async function listRemoteChecklists(locationType?: LocationType, unit?: string) {
   let query = supabase.from("audit_checklists").select("id,name,file_name,location_type,items,created_at,audit_units(name)").order("created_at");
