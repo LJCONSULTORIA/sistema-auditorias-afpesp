@@ -455,6 +455,14 @@ function AuditStatusDoughnut({
     </div>
   );
 }
+function splitApplicableRequirements(value: string) {
+  const separated = String(value ?? "")
+    .replace(/\s+e\s+(?=\d)/gi, ";")
+    .split(/[;,|/\n]+/)
+    .map((requirement) => requirement.trim())
+    .filter(Boolean);
+  return [...new Set(separated)];
+}
 function HomePage() {
   const audits = useRemoteAuditsData();
   const units = useRemoteUnits().filter((item) => item.active);
@@ -490,15 +498,11 @@ function HomePage() {
   const counts = classes.map(
     (c) => answers.filter((a) => a.classification === c).length,
   );
-  const reqs = [
-    ...new Set(
-      answers
-        .filter((a) => a.classification === "Não Conforme")
-        .map((a) => a.requirement),
-    ),
-  ]
-    .filter(Boolean)
-    .sort();
+  const nonConformityRequirements = answers
+    .filter((a) => a.classification === "Não Conforme")
+    .flatMap((a) => splitApplicableRequirements(a.requirement));
+  const reqs = [...new Set(nonConformityRequirements)]
+    .sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
   const visibleUnits = units.filter((u) => type === "Todos" || u.type === type);
   const statusCounts = [
     filtered.filter((audit) => audit.status === "Programada").length,
@@ -732,12 +736,7 @@ function HomePage() {
                 {
                   label: "Não conformidades",
                   data: reqs.map(
-                    (r) =>
-                      answers.filter(
-                        (a) =>
-                          a.requirement === r &&
-                          a.classification === "Não Conforme",
-                      ).length,
+                    (r) => nonConformityRequirements.filter((requirement) => requirement === r).length,
                   ),
                   backgroundColor: "#ef4444",
                   borderRadius: 10,
@@ -835,13 +834,11 @@ function Dashboard() {
   const counts = classes.map(
     (c) => answers.filter((a) => a.classification === c).length,
   );
-  const reqs = [
-    ...new Set(
-      answers
-        .filter((a) => a.classification === "Não Conforme")
-        .map((a) => a.requirement),
-    ),
-  ].sort();
+  const nonConformityRequirements = answers
+    .filter((a) => a.classification === "Não Conforme")
+    .flatMap((a) => splitApplicableRequirements(a.requirement));
+  const reqs = [...new Set(nonConformityRequirements)]
+    .sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
   return (
     <>
       <PageTitle
@@ -875,12 +872,7 @@ function Dashboard() {
                 {
                   label: "Não conformidades",
                   data: reqs.map(
-                    (r) =>
-                      answers.filter(
-                        (a) =>
-                          a.requirement === r &&
-                          a.classification === "Não Conforme",
-                      ).length,
+                    (r) => nonConformityRequirements.filter((requirement) => requirement === r).length,
                   ),
                   backgroundColor: "#dc2626",
                 },
