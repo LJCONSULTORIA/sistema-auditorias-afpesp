@@ -69,6 +69,17 @@ export interface Answer {
   recommendation: string;
   photos: string[];
   photoPaths?: string[];
+  aiReviews?: Array<{
+    requestedAt: string;
+    acceptedAt?: string;
+    originalFinding: string;
+    originalEvidence: string;
+    suggestedFinding: string;
+    suggestedEvidence: string;
+    accepted: boolean;
+    model: string;
+    promptVersion: string;
+  }>;
 }
 export interface Audit {
   id?: number | string;
