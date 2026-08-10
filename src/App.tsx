@@ -21,7 +21,6 @@ import {
   Plus,
   Save,
   Settings,
-  Sparkles,
   Smartphone,
   Trash2,
   Users,
@@ -38,7 +37,6 @@ import {
 } from "chart.js";
 import type { Plugin } from "chart.js";
 import { Bar, Doughnut } from "react-chartjs-2";
-import { FunctionsHttpError } from "@supabase/supabase-js";
 import type { Session } from "@supabase/supabase-js";
 import { saveAs } from "file-saver";
 import JSZip from "jszip";
@@ -618,6 +616,8 @@ function HomePage() {
   });
   const planRealized = filteredPlan.filter((item) => item.status === "Realizada no prazo").length;
   const planRealizedLate = filteredPlan.filter((item) => item.status === "Realizada em atraso").length;
+  const planReprogrammed = filteredPlan.filter((item) => item.status === "Reprogramada").length;
+  const planNotPerformed = filteredPlan.filter((item) => item.status === "Não realizada").length;
   const planEfficacy = filteredPlan.length ? Math.round(planRealized / filteredPlan.length * 1000) / 10 : 0;
   const answers = answeredAudits.flatMap((a) => a.answers).filter((a) => a.classification);
   const counts = classes.map(
@@ -699,7 +699,7 @@ function HomePage() {
       </div>
       <h2 className="mb-1 text-lg font-bold text-slate-800">Visão geral do planejamento</h2>
       <p className="mb-3 text-sm text-slate-500">Os mesmos dados do Planejamento Anual, considerando os filtros selecionados.</p>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
         <Stat
           title="Total planejado"
           value={String(filteredPlan.length)}
@@ -727,8 +727,14 @@ function HomePage() {
         />
         <Stat
           title="Reprogramadas"
-          value={String(filteredPlan.filter((item) => item.status === "Reprogramada").length)}
+          value={String(planReprogrammed)}
           icon={<Settings />}
+          onClick={() => nav("/planejamento")}
+        />
+        <Stat
+          title="Não realizadas"
+          value={String(planNotPerformed)}
+          icon={<CalendarDays />}
           onClick={() => nav("/planejamento")}
         />
         <Stat
@@ -1569,14 +1575,8 @@ function AuditForm() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
-  const [aiLoadingQuestionId, setAiLoadingQuestionId] = useState<string | null>(null);
-  const [aiSuggestions, setAiSuggestions] = useState<Record<string, {
-    finding: string;
-    evidences: string[];
-    model: string;
-    promptVersion: string;
-    requestedAt: string;
-  }>>({});
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
   const [audit, setAudit] = useState<Audit>({
     locationType,
     unit: selectedUnit,
@@ -1783,59 +1783,39 @@ function AuditForm() {
     setAudit(updated);
     setSuccess("Auditoria aprovada e finalizada.");
   };
-  const returnForAdjustments = async () => {
+  const openReturnDialog = () => {
     if (!id || !isAdmin || !["Finalizada e aguardando aprovação", "Finalizada"].includes(audit.status)) return;
-    const reason = prompt("Informe aos auditores quais ajustes devem ser realizados:")?.trim();
-    if (!reason) return setError("Informe o motivo da devolução para orientar os auditores responsáveis.");
-    if (!confirm("Devolver esta auditoria aos responsáveis para ajustes?")) return;
-    const updated: Audit = { ...audit, status: "Devolvido para ajustes", approvedAt: undefined, approvedBy: undefined, returnedAt: new Date().toISOString(), returnedBy: auditorAtual, returnReason: reason, updatedAt: new Date().toISOString() };
-    await saveRemoteAudit({ ...updated, id });
-    notifyRemoteDataChanged();
-    setAudit(updated);
-    setSuccess("Auditoria devolvida para ajustes.");
+    setError("");
+    setReturnReason("");
+    setReturnDialogOpen(true);
+  };
+  const confirmReturnForAdjustments = async () => {
+    if (!id || !isAdmin || !returnReason.trim()) {
+      return setError("Informe o motivo da devolução para orientar os auditores responsáveis.");
+    }
+    setError("");
+    setSuccess("");
+    try {
+      const updated: Audit = { ...audit, status: "Devolvido para ajustes", approvedAt: undefined, approvedBy: undefined, returnedAt: new Date().toISOString(), returnedBy: auditorAtual, returnReason: returnReason.trim(), updatedAt: new Date().toISOString() };
+      await saveRemoteAudit({ ...updated, id });
+      const persisted = await getRemoteAudit(id);
+      if (persisted.status !== "Devolvido para ajustes" || !persisted.returnedAt) {
+        throw new Error("A devolução não foi confirmada pelo banco de dados. Nenhuma mensagem de sucesso foi exibida.");
+      }
+      notifyRemoteDataChanged();
+      setAudit(persisted);
+      setReturnDialogOpen(false);
+      setReturnReason("");
+      setSuccess("Auditoria devolvida para ajustes. Os auditores responsáveis serão avisados no sistema.");
+    } catch (returnError) {
+      setError(returnError instanceof Error ? returnError.message : "Não foi possível devolver a auditoria para ajustes.");
+    }
   };
   const update = (i: number, p: Partial<Answer>) =>
     setAudit((a) => ({
       ...a,
       answers: a.answers.map((x, j) => (j === i ? { ...x, ...p } : x)),
     }));
-  const requestAiReview = async (index: number) => {
-    const answer = audit.answers[index];
-    if (!navigator.onLine)
-      return setError("A revisão com IA está disponível somente quando o dispositivo estiver conectado à internet.");
-    if (!id)
-      return setError("Salve a auditoria antes de solicitar a revisão com IA.");
-    const currentEvidences = evidenceTexts(answer);
-    if (!answer.finding.trim() && !currentEvidences.some((value) => value.trim()))
-      return setError("Preencha a descrição ou a evidência antes de solicitar a revisão com IA.");
-    setError("");
-    setAiLoadingQuestionId(answer.id);
-    try {
-      const { data, error: functionError } = await supabase.functions.invoke("review-audit-text", {
-        body: { auditId: id, answerId: answer.id, question: answer.question, requirement: answer.requirement, classification: answer.classification, finding: answer.finding, evidences: currentEvidences },
-      });
-      if (functionError) {
-        if (functionError instanceof FunctionsHttpError) {
-          const body = await functionError.context.json().catch(() => null);
-          throw new Error(body?.error || "O serviço de IA retornou um erro sem detalhes.");
-        }
-        throw functionError;
-      }
-      if (!data?.suggestion?.finding || !Array.isArray(data?.suggestion?.evidences)) throw new Error(data?.error || "A IA não retornou uma sugestão válida.");
-      setAiSuggestions((current) => ({ ...current, [answer.id]: { finding: data.suggestion.finding, evidences: data.suggestion.evidences, model: data.model, promptVersion: data.promptVersion, requestedAt: new Date().toISOString() } }));
-    } catch (reviewError) {
-      setError(reviewError instanceof Error ? reviewError.message : "Não foi possível revisar o texto com IA.");
-    } finally { setAiLoadingQuestionId(null); }
-  };
-  const acceptAiReview = (index: number) => {
-    const answer = audit.answers[index];
-    const suggestion = aiSuggestions[answer.id];
-    if (!suggestion) return;
-    const suggestedEvidence = suggestion.evidences.join("\n\n");
-    update(index, { finding: suggestion.finding, evidences: suggestion.evidences, recommendation: suggestion.evidences[0] ?? "", aiReviews: [...(answer.aiReviews ?? []), { requestedAt: suggestion.requestedAt, acceptedAt: new Date().toISOString(), originalFinding: answer.finding, originalEvidence: evidenceTexts(answer).join("\n\n"), suggestedFinding: suggestion.finding, suggestedEvidence, accepted: true, model: suggestion.model, promptVersion: suggestion.promptVersion }] });
-    setAiSuggestions((current) => { const next = { ...current }; delete next[answer.id]; return next; });
-    setSuccess("Sugestão da IA aplicada. Revise o conteúdo e clique em Salvar para registrá-lo.");
-  };
   const addQuestion = (afterIndex: number) => {
     const newQuestion: Answer = {
       id: crypto.randomUUID(),
@@ -1916,7 +1896,7 @@ function AuditForm() {
               </button>
             )}
             {id && audit.status === "Finalizada" && isAdmin && (
-              <button className="btn-secondary" onClick={returnForAdjustments}>Reabrir para ajustes</button>
+              <button className="btn-secondary" onClick={openReturnDialog}>Reabrir para ajustes</button>
             )}
             {id && audit.status !== "Finalizada" && isAdmin && (
               <button className="btn border border-red-300 bg-red-50 text-red-700 hover:bg-red-100" onClick={deleteEditableAudit}>
@@ -1937,7 +1917,7 @@ function AuditForm() {
               </button>
             )}
             {id && audit.status === "Finalizada e aguardando aprovação" && isAdmin && <>
-              <button className="btn-secondary" onClick={returnForAdjustments}>Devolver para ajustes</button>
+              <button className="btn-secondary" onClick={openReturnDialog}>Devolver para ajustes</button>
               <button className="btn bg-green-700 text-white hover:bg-green-800" onClick={approveAudit}>Aprovar e finalizar</button>
             </>}
             {canManageAudit && (
@@ -2265,20 +2245,6 @@ function AuditForm() {
                   {!readOnly && <button type="button" className="btn-secondary" onClick={() => update(i, { evidences: [...evidenceTexts(ans), ""] })}><Plus size={16} /> Adicionar evidência</button>}
                 </div>
                 {!readOnly && <div className="md:col-span-2">
-                  <button type="button" className="btn-secondary" disabled={aiLoadingQuestionId === ans.id} onClick={() => requestAiReview(i)}><Sparkles size={16} />{aiLoadingQuestionId === ans.id ? "Revisando texto..." : "Revisar descrição e evidência com IA"}</button>
-                  <p className="mt-2 text-xs text-slate-500">A IA apenas melhora a redação com base no conteúdo informado. Nenhum texto é substituído sem sua aprovação.</p>
-                  {aiSuggestions[ans.id] && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-label="Revisão de texto com IA">
-                    <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
-                      <div className="mb-4 flex items-start justify-between gap-4"><div><h3 className="text-xl font-bold text-afpesp-800">Revisão de descrição e evidências</h3><p className="mt-1 text-sm text-slate-500">Compare os textos. A alteração só será aplicada após clicar em Aceitar alteração.</p></div><button type="button" className="rounded-full p-2 hover:bg-slate-100" onClick={() => setAiSuggestions((current) => { const next = { ...current }; delete next[ans.id]; return next; })}><X size={20} /></button></div>
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <div><div className="label">Texto atual</div><div className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm"><p><b>Descrição:</b> {ans.finding || "—"}</p>{evidenceTexts(ans).map((value, index) => <p key={index}><b>Evidência {index + 1}:</b> {value || "—"}</p>)}</div></div>
-                        <div><div className="label">Sugestão da IA</div><div className="space-y-3 rounded-xl border border-afpesp-200 bg-afpesp-50/50 p-4 text-sm"><p><b>Descrição:</b> {aiSuggestions[ans.id].finding}</p>{aiSuggestions[ans.id].evidences.map((value, index) => <p key={index}><b>Evidência {index + 1}:</b> {value || "—"}</p>)}</div></div>
-                      </div>
-                      <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="btn-secondary" onClick={() => setAiSuggestions((current) => { const next = { ...current }; delete next[ans.id]; return next; })}>Manter texto atual</button><button type="button" className="btn-primary" onClick={() => acceptAiReview(i)}>Aceitar alteração</button></div>
-                    </div>
-                  </div>}
-                </div>}
-                {!readOnly && <div className="md:col-span-2">
                   <Field label="Fotos / evidências fotográficas">
                     <input
                       type="file"
@@ -2337,6 +2303,26 @@ function AuditForm() {
           )}
           </>
           )}
+        </div>
+      )}
+      {returnDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-labelledby="return-dialog-title">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="return-dialog-title" className="text-xl font-bold text-afpesp-800">Devolver auditoria para ajustes</h2>
+                <p className="mt-1 text-sm text-slate-600">Descreva claramente o que deve ser corrigido. Esta mensagem aparecerá em pop-up para os auditores responsáveis.</p>
+              </div>
+              <button type="button" className="rounded-full p-2 hover:bg-slate-100" aria-label="Fechar" onClick={() => setReturnDialogOpen(false)}><X size={20} /></button>
+            </div>
+            <Field label="Motivo e orientações para ajuste">
+              <textarea className="field min-h-32" autoFocus value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="Informe os ajustes necessários..." />
+            </Field>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-secondary" onClick={() => setReturnDialogOpen(false)}>Cancelar</button>
+              <button type="button" className="btn-primary" disabled={!returnReason.trim()} onClick={confirmReturnForAdjustments}>Confirmar devolução</button>
+            </div>
+          </div>
         </div>
       )}
     </>
@@ -2815,14 +2801,19 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
   const filteredItems = monthFilter === "Todos" ? items : items.filter((item) => item.month === monthFilter);
   const realized = filteredItems.filter((item) => item.status === "Realizada no prazo").length;
   const realizedLate = filteredItems.filter((item) => item.status === "Realizada em atraso").length;
+  const pending = filteredItems.filter((item) => item.status === "Planejada").length;
+  const reprogrammed = filteredItems.filter((item) => item.status === "Reprogramada").length;
+  const notPerformed = filteredItems.filter((item) => item.status === "Não realizada").length;
   const efficacy = filteredItems.length ? Math.round(realized / filteredItems.length * 1000) / 10 : 0;
   const monthlyPlanned = monthNames.map((_, index) => items.filter((item) => item.month === index + 1).length);
   const monthlyRealized = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada no prazo").length);
   const monthlyRealizedLate = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada em atraso").length);
+  const monthlyReprogrammed = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Reprogramada").length);
+  const monthlyNotPerformed = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Não realizada").length);
   const visibleMonthIndexes = monthFilter === "Todos" ? monthNames.map((_, index) => index) : [monthFilter - 1];
   return <>
     <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." />
-    <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Stat title="Planejadas" value={String(filteredItems.length)} icon={<CalendarDays size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Realizadas em atraso" value={String(realizedLate)} icon={<CalendarDays size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
+    <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7"><Stat title="Total planejado" value={String(filteredItems.length)} icon={<CalendarDays size={22} />} /><Stat title="Planejadas pendentes" value={String(pending)} icon={<ClipboardCheck size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Realizadas em atraso" value={String(realizedLate)} icon={<CalendarDays size={22} />} /><Stat title="Reprogramadas" value={String(reprogrammed)} icon={<Settings size={22} />} /><Stat title="Não realizadas" value={String(notPerformed)} icon={<CalendarDays size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
     <div className="card mb-6">
       <h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2>
       <p className="mb-4 text-sm text-slate-500">Passe o mouse ou toque em uma barra para consultar os locais/processos daquele mês.</p>
@@ -2834,9 +2825,11 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
               { label: "Planejadas", data: visibleMonthIndexes.map((index) => monthlyPlanned[index]), backgroundColor: "#93c5fd", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
               { label: "Realizadas no prazo", data: visibleMonthIndexes.map((index) => monthlyRealized[index]), backgroundColor: "#15803d", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
               { label: "Realizadas em atraso", data: visibleMonthIndexes.map((index) => monthlyRealizedLate[index]), backgroundColor: "#dc2626", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
+              { label: "Reprogramadas", data: visibleMonthIndexes.map((index) => monthlyReprogrammed[index]), backgroundColor: "#d97706", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
+              { label: "Não realizadas", data: visibleMonthIndexes.map((index) => monthlyNotPerformed[index]), backgroundColor: "#64748b", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
             ],
           }}
-          options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const status = context.datasetIndex === 1 ? "Realizada no prazo" : context.datasetIndex === 2 ? "Realizada em atraso" : null; const rows = items.filter((item) => item.month === monthIndex + 1 && (!status || item.status === status)); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
+          options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const statuses: Array<PlanStatus | null> = [null, "Realizada no prazo", "Realizada em atraso", "Reprogramada", "Não realizada"]; const status = statuses[context.datasetIndex] ?? null; const rows = items.filter((item) => item.month === monthIndex + 1 && (!status || item.status === status)); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
         />
       </div>
       <div className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
