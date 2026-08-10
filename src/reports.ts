@@ -16,6 +16,7 @@ import {
 import { saveAs } from "file-saver";
 import * as XLSX from "xlsx";
 import type { Answer, Audit, DocumentReference } from "./types";
+import { buildModG250Report } from "./reportsModG250";
 const clean = (v: string) => v || "Não informado";
 const imageBytes = async (url: string) => {
   if (url.startsWith("data:"))
@@ -322,8 +323,8 @@ export async function buildAuditReport(a: Audit) {
     });
 }
 export async function exportDocx(a: Audit) {
-  const blob = await Packer.toBlob(await buildAuditReport(a));
-  saveAs(blob, `Relatorio_Auditoria_${a.id ?? "nova"}.docx`);
+  const blob = await Packer.toBlob(await buildModG250Report(a));
+  saveAs(blob, `MOD_G_250_Relatorio_Auditoria_${a.id ?? "nova"}.docx`);
 }
 export function exportExcel(audits: Audit[]) {
   const rows = audits.flatMap((a) =>
