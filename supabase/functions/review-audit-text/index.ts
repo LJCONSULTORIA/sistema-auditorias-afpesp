@@ -94,14 +94,14 @@ Deno.serve(async (request: Request) => {
     if (!openAiResponse.ok) {
       const providerCode = responseBody?.error?.code ?? responseBody?.error?.type ?? "provider_error";
       console.error("review-audit-text provider", providerCode, responseBody?.error?.message ?? "unknown");
-      const message = providerCode === "insufficient_quota"
+      const message = providerCode === "insufficient_quota" || openAiResponse.status === 429
         ? "A conta da API de IA está sem créditos ou atingiu o limite de gastos. O administrador deve regularizar o faturamento da API."
-        : providerCode === "invalid_api_key"
+        : providerCode === "invalid_api_key" || openAiResponse.status === 401
           ? "A chave da API de IA é inválida. O administrador deve atualizar a configuração."
           : providerCode === "model_not_found"
             ? "O projeto da API não possui acesso ao modelo configurado."
             : "O serviço de IA não conseguiu revisar o texto neste momento.";
-      return json({ error: message, code: providerCode }, 502);
+      return json({ error: message, code: providerCode, providerStatus: openAiResponse.status }, 502);
     }
     const outputText = responseBody.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) => item.content ?? [])
       .find((content: { type?: string }) => content.type === "output_text")?.text;
