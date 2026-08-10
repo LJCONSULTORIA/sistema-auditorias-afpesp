@@ -37,6 +37,7 @@ import {
 } from "chart.js";
 import type { Plugin } from "chart.js";
 import { Bar, Doughnut } from "react-chartjs-2";
+import { FunctionsHttpError } from "@supabase/supabase-js";
 import type { Session } from "@supabase/supabase-js";
 import { saveAs } from "file-saver";
 import JSZip from "jszip";
@@ -195,6 +196,8 @@ function useRemoteChecklistsData(locationType?: LocationType, unit?: string) {
 }
 const formatDate = (value: string) =>
   value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "—";
+const evidenceTexts = (answer: Answer) =>
+  answer.evidences?.length ? answer.evidences : [answer.recommendation ?? ""];
 function Layout({
   children,
   user,
@@ -296,7 +299,7 @@ function Login({ onLogin }: { onLogin: (mode: LayoutMode) => void }) {
       return;
     }
     setLoading(true);
-    const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+    const redirectTo = "https://lljafpesp.github.io/sistema-auditorias-afpesp/";
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
     setLoading(false);
     setMessage(error ? `Não foi possível enviar: ${error.message}` : "Solicitação enviada. Verifique também a caixa de spam. O link funciona para endereços autorizados no sistema.");
@@ -474,12 +477,18 @@ function splitApplicableRequirements(value: string) {
 }
 function HomePage() {
   const audits = useRemoteAuditsData();
+  const [planItems, setPlanItems] = useState<AnnualPlanItem[]>([]);
   const units = useRemoteUnits().filter((item) => item.active);
   const nav = useNavigate();
   const [type, setType] = useState<LocationType | "Todos">("Todos");
   const [unit, setUnit] = useState("Todos");
   const [period, setPeriod] = useState("Todas as datas");
   const [selectedResult, setSelectedResult] = useState<Classification | null>(null);
+  useEffect(() => {
+    supabase.from("audit_annual_plan_items").select("id,process,planned_month,planned_year,auditor,status,audit_record_id,notes").eq("planned_year", new Date().getFullYear()).then(({ data }) =>
+      setPlanItems((data ?? []).map((row) => ({ id: row.id, process: row.process, month: row.planned_month, year: row.planned_year, auditor: row.auditor, status: row.status as PlanStatus, auditId: row.audit_record_id ?? undefined, notes: row.notes }))),
+    );
+  }, []);
   useEffect(() => setUnit("Todos"), [type]);
   const now = new Date();
   const filtered = audits.filter((a) => {
@@ -503,6 +512,16 @@ function HomePage() {
     return true;
   });
   const answeredAudits = filtered.filter((a) => a.status !== "Programada");
+  const filteredPlan = planItems.filter((item) => {
+    const isLeisure = /^(ul\s|unidade de lazer)/i.test(item.process.trim());
+    if (type === "Unidade de Lazer" && !isLeisure) return false;
+    if (type === "Sede Social" && isLeisure) return false;
+    if (unit !== "Todos" && !normalize(item.process).includes(normalize(unit).replace(/^ul\s+/, ""))) return false;
+    if (period === "Este mês" && item.month !== now.getMonth() + 1) return false;
+    return true;
+  });
+  const planRealized = filteredPlan.filter((item) => item.status === "Realizada no prazo").length;
+  const planEfficacy = filteredPlan.length ? Math.round(planRealized / filteredPlan.length * 1000) / 10 : 0;
   const answers = answeredAudits.flatMap((a) => a.answers).filter((a) => a.classification);
   const counts = classes.map(
     (c) => answers.filter((a) => a.classification === c).length,
@@ -581,48 +600,44 @@ function HomePage() {
           </select>
         </Field>
       </div>
-      <h2 className="mb-3 text-lg font-bold text-slate-800">Visão geral</h2>
+      <h2 className="mb-1 text-lg font-bold text-slate-800">Visão geral do planejamento</h2>
+      <p className="mb-3 text-sm text-slate-500">Os mesmos dados do Planejamento Anual, considerando os filtros selecionados.</p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
         <Stat
-          title="Total de auditorias"
-          value={String(filtered.length)}
+          title="Total planejado"
+          value={String(filteredPlan.length)}
           icon={<ClipboardCheck />}
-          detail="Registros no filtro atual"
-          onClick={() => nav("/auditorias")}
+          detail="Itens do plano anual"
+          onClick={() => nav("/planejamento")}
         />
         <Stat
-          title="Auditoria Finalizada"
-          value={String(statusCounts[2])}
+          title="Realizadas no prazo"
+          value={String(planRealized)}
           icon={<ArchiveRestore />}
-          onClick={() => nav("/auditorias?status=Finalizada")}
+          onClick={() => nav("/planejamento")}
         />
         <Stat
-          title="Auditoria Programada"
-          value={String(statusCounts[0])}
+          title="Planejadas pendentes"
+          value={String(filteredPlan.filter((item) => item.status === "Planejada").length)}
           icon={<ClipboardCheck />}
-          onClick={() => nav("/auditorias?status=Programada")}
+          onClick={() => nav("/planejamento")}
         />
         <Stat
-          title="Auditoria em Andamento"
-          value={String(statusCounts[1])}
+          title="Reprogramadas"
+          value={String(filteredPlan.filter((item) => item.status === "Reprogramada").length)}
           icon={<Settings />}
-          onClick={() => nav("/auditorias?status=Em%20andamento")}
+          onClick={() => nav("/planejamento")}
         />
         <Stat
-          title="Locais auditados"
-          value={String(
-            new Set(
-              filtered
-                .filter((a) => a.status === "Finalizada")
-                .map((a) => `${a.locationType}|${a.unit}`),
-            ).size,
-          )}
-          icon={<Building2 />}
-          detail="Somente finalizadas"
-          onClick={() => nav("/auditorias?status=Finalizada")}
+          title="Eficácia do plano"
+          value={`${planEfficacy}%`}
+          icon={<BarChart3 />}
+          detail="Realizadas no prazo ÷ planejadas"
+          onClick={() => nav("/planejamento")}
         />
       </div>
-      <h2 className="mb-3 mt-6 text-lg font-bold text-slate-800">Resultados registrados</h2>
+      <h2 className="mb-1 mt-6 text-lg font-bold text-slate-800">Resultados das auditorias cadastradas</h2>
+      <p className="mb-3 text-sm text-slate-500">Dados de execução, respostas e classificações efetivamente registradas no sistema.</p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
           title="Conformidades"
@@ -958,7 +973,7 @@ function downloadAuditChecklistExcel(audit: Audit) {
     "Requisito aplicável": answer.requirement,
     Classificação: answer.classification || "",
     Descrição: answer.finding,
-    Evidência: answer.recommendation,
+    Evidências: evidenceTexts(answer).join("\n"),
     "Documentos aplicáveis": (answer.documents ?? []).map((document) =>
       [document.type, document.code, document.title, document.version && `versão ${document.version}`].filter(Boolean).join(" — "),
     ).join(" | "),
@@ -1452,7 +1467,7 @@ function AuditForm() {
   const [aiLoadingQuestionId, setAiLoadingQuestionId] = useState<string | null>(null);
   const [aiSuggestions, setAiSuggestions] = useState<Record<string, {
     finding: string;
-    evidence: string;
+    evidences: string[];
     model: string;
     promptVersion: string;
     requestedAt: string;
@@ -1505,6 +1520,7 @@ function AuditForm() {
         classification: null,
         finding: "",
         recommendation: "",
+        evidences: [""],
         photos: [],
       })),
     }));
@@ -1678,17 +1694,24 @@ function AuditForm() {
       return setError("A revisão com IA está disponível somente quando o dispositivo estiver conectado à internet.");
     if (!id)
       return setError("Salve a auditoria antes de solicitar a revisão com IA.");
-    if (!answer.finding.trim() && !answer.recommendation.trim())
+    const currentEvidences = evidenceTexts(answer);
+    if (!answer.finding.trim() && !currentEvidences.some((value) => value.trim()))
       return setError("Preencha a descrição ou a evidência antes de solicitar a revisão com IA.");
     setError("");
     setAiLoadingQuestionId(answer.id);
     try {
       const { data, error: functionError } = await supabase.functions.invoke("review-audit-text", {
-        body: { auditId: id, answerId: answer.id, question: answer.question, requirement: answer.requirement, classification: answer.classification, finding: answer.finding, evidence: answer.recommendation },
+        body: { auditId: id, answerId: answer.id, question: answer.question, requirement: answer.requirement, classification: answer.classification, finding: answer.finding, evidences: currentEvidences },
       });
-      if (functionError) throw functionError;
-      if (!data?.suggestion?.finding || !data?.suggestion?.evidence) throw new Error(data?.error || "A IA não retornou uma sugestão válida.");
-      setAiSuggestions((current) => ({ ...current, [answer.id]: { finding: data.suggestion.finding, evidence: data.suggestion.evidence, model: data.model, promptVersion: data.promptVersion, requestedAt: new Date().toISOString() } }));
+      if (functionError) {
+        if (functionError instanceof FunctionsHttpError) {
+          const body = await functionError.context.json().catch(() => null);
+          throw new Error(body?.error || "O serviço de IA retornou um erro sem detalhes.");
+        }
+        throw functionError;
+      }
+      if (!data?.suggestion?.finding || !Array.isArray(data?.suggestion?.evidences)) throw new Error(data?.error || "A IA não retornou uma sugestão válida.");
+      setAiSuggestions((current) => ({ ...current, [answer.id]: { finding: data.suggestion.finding, evidences: data.suggestion.evidences, model: data.model, promptVersion: data.promptVersion, requestedAt: new Date().toISOString() } }));
     } catch (reviewError) {
       setError(reviewError instanceof Error ? reviewError.message : "Não foi possível revisar o texto com IA.");
     } finally { setAiLoadingQuestionId(null); }
@@ -1697,7 +1720,8 @@ function AuditForm() {
     const answer = audit.answers[index];
     const suggestion = aiSuggestions[answer.id];
     if (!suggestion) return;
-    update(index, { finding: suggestion.finding, recommendation: suggestion.evidence, aiReviews: [...(answer.aiReviews ?? []), { requestedAt: suggestion.requestedAt, acceptedAt: new Date().toISOString(), originalFinding: answer.finding, originalEvidence: answer.recommendation, suggestedFinding: suggestion.finding, suggestedEvidence: suggestion.evidence, accepted: true, model: suggestion.model, promptVersion: suggestion.promptVersion }] });
+    const suggestedEvidence = suggestion.evidences.join("\n\n");
+    update(index, { finding: suggestion.finding, evidences: suggestion.evidences, recommendation: suggestion.evidences[0] ?? "", aiReviews: [...(answer.aiReviews ?? []), { requestedAt: suggestion.requestedAt, acceptedAt: new Date().toISOString(), originalFinding: answer.finding, originalEvidence: evidenceTexts(answer).join("\n\n"), suggestedFinding: suggestion.finding, suggestedEvidence, accepted: true, model: suggestion.model, promptVersion: suggestion.promptVersion }] });
     setAiSuggestions((current) => { const next = { ...current }; delete next[answer.id]; return next; });
     setSuccess("Sugestão da IA aplicada. Revise o conteúdo e clique em Salvar para registrá-lo.");
   };
@@ -1716,6 +1740,7 @@ function AuditForm() {
       classification: null,
       finding: "",
       recommendation: "",
+      evidences: [""],
       photos: [],
     };
     setAudit((current) => ({
@@ -2100,28 +2125,36 @@ function AuditForm() {
                   />
                 </Field>
                 </div>
-                <div className="md:col-span-2">
-                <Field label="Evidência">
-                  <textarea
-                    className="field min-h-24"
-                    readOnly={readOnly}
-                    value={ans.recommendation}
-                    onChange={(e) =>
-                      update(i, { recommendation: e.target.value })
-                    }
-                  />
-                </Field>
+                <div className="md:col-span-2 space-y-3">
+                  {evidenceTexts(ans).map((evidence, evidenceIndex) => (
+                    <div key={`${ans.id}-evidence-${evidenceIndex}`} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <span className="label mb-0">Evidência {evidenceIndex + 1}</span>
+                        {!readOnly && evidenceTexts(ans).length > 1 && <button type="button" className="text-sm font-semibold text-red-600" onClick={() => {
+                          const next = evidenceTexts(ans).filter((_, index) => index !== evidenceIndex);
+                          update(i, { evidences: next, recommendation: next[0] ?? "" });
+                        }}>Excluir evidência</button>}
+                      </div>
+                      <textarea className="field min-h-24" readOnly={readOnly} value={evidence} onChange={(event) => {
+                        const next = evidenceTexts(ans).map((value, index) => index === evidenceIndex ? event.target.value : value);
+                        update(i, { evidences: next, recommendation: next[0] ?? "" });
+                      }} />
+                    </div>
+                  ))}
+                  {!readOnly && <button type="button" className="btn-secondary" onClick={() => update(i, { evidences: [...evidenceTexts(ans), ""] })}><Plus size={16} /> Adicionar evidência</button>}
                 </div>
                 {!readOnly && <div className="md:col-span-2">
                   <button type="button" className="btn-secondary" disabled={aiLoadingQuestionId === ans.id} onClick={() => requestAiReview(i)}><Sparkles size={16} />{aiLoadingQuestionId === ans.id ? "Revisando texto..." : "Revisar descrição e evidência com IA"}</button>
                   <p className="mt-2 text-xs text-slate-500">A IA apenas melhora a redação com base no conteúdo informado. Nenhum texto é substituído sem sua aprovação.</p>
-                  {aiSuggestions[ans.id] && <div className="mt-4 rounded-xl border border-afpesp-200 bg-afpesp-50/50 p-4">
-                    <div className="mb-3 font-semibold text-afpesp-800">Compare antes de aceitar</div>
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div><div className="label">Texto original</div><div className="space-y-3 rounded-lg bg-white p-3 text-sm"><p><b>Descrição:</b> {ans.finding || "—"}</p><p><b>Evidência:</b> {ans.recommendation || "—"}</p></div></div>
-                      <div><div className="label">Sugestão da IA</div><div className="space-y-3 rounded-lg bg-white p-3 text-sm"><p><b>Descrição:</b> {aiSuggestions[ans.id].finding}</p><p><b>Evidência:</b> {aiSuggestions[ans.id].evidence}</p></div></div>
+                  {aiSuggestions[ans.id] && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-label="Revisão de texto com IA">
+                    <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
+                      <div className="mb-4 flex items-start justify-between gap-4"><div><h3 className="text-xl font-bold text-afpesp-800">Revisão de descrição e evidências</h3><p className="mt-1 text-sm text-slate-500">Compare os textos. A alteração só será aplicada após clicar em Aceitar alteração.</p></div><button type="button" className="rounded-full p-2 hover:bg-slate-100" onClick={() => setAiSuggestions((current) => { const next = { ...current }; delete next[ans.id]; return next; })}><X size={20} /></button></div>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div><div className="label">Texto atual</div><div className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm"><p><b>Descrição:</b> {ans.finding || "—"}</p>{evidenceTexts(ans).map((value, index) => <p key={index}><b>Evidência {index + 1}:</b> {value || "—"}</p>)}</div></div>
+                        <div><div className="label">Sugestão da IA</div><div className="space-y-3 rounded-xl border border-afpesp-200 bg-afpesp-50/50 p-4 text-sm"><p><b>Descrição:</b> {aiSuggestions[ans.id].finding}</p>{aiSuggestions[ans.id].evidences.map((value, index) => <p key={index}><b>Evidência {index + 1}:</b> {value || "—"}</p>)}</div></div>
+                      </div>
+                      <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="btn-secondary" onClick={() => setAiSuggestions((current) => { const next = { ...current }; delete next[ans.id]; return next; })}>Manter texto atual</button><button type="button" className="btn-primary" onClick={() => acceptAiReview(i)}>Aceitar alteração</button></div>
                     </div>
-                    <div className="mt-4 flex flex-wrap gap-2"><button type="button" className="btn-primary" onClick={() => acceptAiReview(i)}>Aceitar sugestão</button><button type="button" className="btn-secondary" onClick={() => setAiSuggestions((current) => { const next = { ...current }; delete next[ans.id]; return next; })}>Descartar</button></div>
                   </div>}
                 </div>}
                 {!readOnly && <div className="md:col-span-2">
@@ -2596,6 +2629,7 @@ const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set
 function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
   const [items, setItems] = useState<AnnualPlanItem[]>([]);
   const [year, setYear] = useState(2026);
+  const [monthFilter, setMonthFilter] = useState<number | "Todos">("Todos");
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState({ process: "", month: new Date().getMonth() + 1, auditor: "" });
   const load = async () => {
@@ -2624,17 +2658,19 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
     if (error) return setMessage(error.message);
     setItems((current) => current.filter((row) => row.id !== item.id));
   };
-  const realized = items.filter((item) => item.status === "Realizada no prazo").length;
-  const efficacy = items.length ? Math.round(realized / items.length * 1000) / 10 : 0;
+  const filteredItems = monthFilter === "Todos" ? items : items.filter((item) => item.month === monthFilter);
+  const realized = filteredItems.filter((item) => item.status === "Realizada no prazo").length;
+  const efficacy = filteredItems.length ? Math.round(realized / filteredItems.length * 1000) / 10 : 0;
   const monthlyPlanned = monthNames.map((_, index) => items.filter((item) => item.month === index + 1).length);
   const monthlyRealized = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada no prazo").length);
+  const visibleMonthIndexes = monthFilter === "Todos" ? monthNames.map((_, index) => index) : [monthFilter - 1];
   return <>
-    <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." action={<select className="field w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}><option>2026</option><option>2027</option><option>2028</option></select>} />
-    <div className="mb-6 grid gap-4 sm:grid-cols-3"><Stat title="Planejadas" value={String(items.length)} icon={<CalendarDays size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
-    <div className="card mb-6"><h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2><p className="mb-4 text-sm text-slate-500">Todos os processos do plano anual, sem excluir unidades dos totais.</p><div className="h-72"><Bar data={{ labels: monthNames, datasets: [{ label: "Planejadas", data: monthlyPlanned, backgroundColor: "#93c5fd" }, { label: "Realizadas no prazo", data: monthlyRealized, backgroundColor: "#15803d" }] }} options={{ responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }} /></div></div>
+    <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." action={<div className="flex gap-2"><select className="field w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}><option>2026</option><option>2027</option><option>2028</option></select><select className="field w-36" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value === "Todos" ? "Todos" : Number(e.target.value))}><option value="Todos">Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></div>} />
+    <div className="mb-6 grid gap-4 sm:grid-cols-3"><Stat title="Planejadas" value={String(filteredItems.length)} icon={<CalendarDays size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
+    <div className="card mb-6"><h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2><p className="mb-4 text-sm text-slate-500">Passe o mouse ou toque em uma barra para consultar os locais/processos daquele mês.</p><div className="h-72"><Bar data={{ labels: visibleMonthIndexes.map((index) => monthNames[index]), datasets: [{ label: "Planejadas", data: visibleMonthIndexes.map((index) => monthlyPlanned[index]), backgroundColor: "#93c5fd" }, { label: "Realizadas no prazo", data: visibleMonthIndexes.map((index) => monthlyRealized[index]), backgroundColor: "#15803d" }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const rows = items.filter((item) => item.month === monthIndex + 1 && (context.datasetIndex === 0 || item.status === "Realizada no prazo")); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }} /></div></div>
     {isAdmin && <div className="card mb-6"><h2 className="mb-4 text-lg font-bold text-afpesp-700">Incluir item no planejamento</h2><div className="grid gap-3 md:grid-cols-[2fr_.7fr_1.2fr_auto]"><Field label="Processo / local"><input className="field" value={draft.process} onChange={(e) => setDraft({ ...draft, process: e.target.value })} /></Field><Field label="Mês"><select className="field" value={draft.month} onChange={(e) => setDraft({ ...draft, month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></Field><Field label="Auditor(es)"><input className="field" value={draft.auditor} onChange={(e) => setDraft({ ...draft, auditor: e.target.value })} /></Field><button className="btn-primary self-end" onClick={add}><Plus size={16} /> Incluir</button></div></div>}
     {message && <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
-    <div className="card overflow-hidden p-0"><div className="grid grid-cols-[1fr_70px] gap-3 border-b bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px]"><span>Processo / local</span><span>Mês</span><span className="hidden sm:block">Auditor(es)</span><span className="hidden sm:block">Status</span><span /></div><div className="divide-y">{items.map((item) => <div key={item.id} className="grid grid-cols-[1fr_70px] gap-3 p-3 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px] sm:items-center"><input className="field" readOnly={!isAdmin} value={item.process} onBlur={(e) => isAdmin && e.target.value !== item.process && updateItem(item, { process: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, process: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.month} onChange={(e) => updateItem(item, { month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select><input className="field sm:block" readOnly={!isAdmin} value={item.auditor} onBlur={(e) => isAdmin && updateItem(item, { auditor: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, auditor: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.status} onChange={(e) => updateItem(item, { status: e.target.value as PlanStatus })}>{planStatuses.map((status) => <option key={status}>{status}</option>)}</select>{isAdmin && <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => remove(item)} aria-label={`Excluir ${item.process}`}><Trash2 size={17} /></button>}</div>)}</div></div>
+    <div className="card overflow-hidden p-0"><div className="grid grid-cols-[1fr_70px] gap-3 border-b bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px]"><span>Processo / local</span><span>Mês</span><span className="hidden sm:block">Auditor(es)</span><span className="hidden sm:block">Status</span><span /></div><div className="divide-y">{filteredItems.map((item) => <div key={item.id} className="grid grid-cols-[1fr_70px] gap-3 p-3 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px] sm:items-center"><input className="field" readOnly={!isAdmin} value={item.process} onBlur={(e) => isAdmin && e.target.value !== item.process && updateItem(item, { process: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, process: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.month} onChange={(e) => updateItem(item, { month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select><input className="field sm:block" readOnly={!isAdmin} value={item.auditor} onBlur={(e) => isAdmin && updateItem(item, { auditor: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, auditor: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.status} onChange={(e) => updateItem(item, { status: e.target.value as PlanStatus })}>{planStatuses.map((status) => <option key={status}>{status}</option>)}</select>{isAdmin && <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => remove(item)} aria-label={`Excluir ${item.process}`}><Trash2 size={17} /></button>}</div>)}</div></div>
   </>;
 }
 

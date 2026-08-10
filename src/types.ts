@@ -67,6 +67,7 @@ export interface Answer {
   classification: Classification | null;
   finding: string;
   recommendation: string;
+  evidences?: string[];
   photos: string[];
   photoPaths?: string[];
   aiReviews?: Array<{

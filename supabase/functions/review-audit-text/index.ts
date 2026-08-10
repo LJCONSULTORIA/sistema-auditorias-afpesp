@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 const model = "gpt-5-mini";
-const promptVersion = "audit-text-v1";
+const promptVersion = "audit-text-v2-multiple-evidences";
 
 type ReviewPayload = {
   auditId: string;
@@ -15,7 +15,7 @@ type ReviewPayload = {
   requirement: string;
   classification: string | null;
   finding: string;
-  evidence: string;
+  evidences: string[];
 };
 
 Deno.serve(async (request: Request) => {
@@ -41,7 +41,7 @@ Deno.serve(async (request: Request) => {
 
     const payload = (await request.json()) as ReviewPayload;
     if (!payload.auditId || !payload.answerId) return json({ error: "Auditoria ou questão não informada." }, 400);
-    if ((payload.finding?.length ?? 0) > 10000 || (payload.evidence?.length ?? 0) > 10000)
+    if ((payload.finding?.length ?? 0) > 10000 || !Array.isArray(payload.evidences) || payload.evidences.length > 20 || payload.evidences.some((value) => typeof value !== "string" || value.length > 10000))
       return json({ error: "O texto informado excede o limite permitido." }, 400);
 
     const [{ data: profile }, { data: record }] = await Promise.all([
@@ -67,13 +67,13 @@ Deno.serve(async (request: Request) => {
       body: JSON.stringify({
         model,
         store: false,
-        instructions: `Você é um revisor técnico de relatórios de auditoria da AFPESP. Melhore clareza, objetividade, gramática e linguagem técnica sem criar fatos, evidências, requisitos ou conclusões. Preserve nomes, datas, números e o sentido original. O campo descrição registra a constatação; o campo evidência registra somente fatos, documentos, registros ou observações que sustentam a constatação. Se faltar conteúdo, mantenha o campo como está; nunca preencha lacunas por suposição. Responda somente em JSON no formato {"finding":"...","evidence":"..."}.`,
+        instructions: `Você é um revisor técnico de relatórios de auditoria da AFPESP. Melhore clareza, objetividade, gramática e linguagem técnica sem criar fatos, evidências, requisitos ou conclusões. Preserve nomes, datas, números e o sentido original. O campo descrição registra a constatação. Cada item do campo evidências registra somente fatos, documentos, registros ou observações que sustentam a constatação. Preserve a quantidade e a separação das evidências recebidas. Se faltar conteúdo, mantenha o campo como está; nunca preencha lacunas por suposição.`,
         input: JSON.stringify({
           questao: payload.question,
           requisito: payload.requirement,
           classificacao: payload.classification,
           descricao_original: payload.finding,
-          evidencia_original: payload.evidence,
+          evidencias_originais: payload.evidences,
         }),
         text: {
           format: {
@@ -82,8 +82,8 @@ Deno.serve(async (request: Request) => {
             strict: true,
             schema: {
               type: "object",
-              properties: { finding: { type: "string" }, evidence: { type: "string" } },
-              required: ["finding", "evidence"],
+              properties: { finding: { type: "string" }, evidences: { type: "array", items: { type: "string" } } },
+              required: ["finding", "evidences"],
               additionalProperties: false,
             },
           },
@@ -91,8 +91,18 @@ Deno.serve(async (request: Request) => {
       }),
     });
     const responseBody = await openAiResponse.json();
-    if (!openAiResponse.ok)
-      return json({ error: "O serviço de IA não conseguiu revisar o texto neste momento." }, 502);
+    if (!openAiResponse.ok) {
+      const providerCode = responseBody?.error?.code ?? responseBody?.error?.type ?? "provider_error";
+      console.error("review-audit-text provider", providerCode, responseBody?.error?.message ?? "unknown");
+      const message = providerCode === "insufficient_quota"
+        ? "A conta da API de IA está sem créditos ou atingiu o limite de gastos. O administrador deve regularizar o faturamento da API."
+        : providerCode === "invalid_api_key"
+          ? "A chave da API de IA é inválida. O administrador deve atualizar a configuração."
+          : providerCode === "model_not_found"
+            ? "O projeto da API não possui acesso ao modelo configurado."
+            : "O serviço de IA não conseguiu revisar o texto neste momento.";
+      return json({ error: message, code: providerCode }, 502);
+    }
     const outputText = responseBody.output?.flatMap((item: { content?: Array<{ type?: string; text?: string }> }) => item.content ?? [])
       .find((content: { type?: string }) => content.type === "output_text")?.text;
     if (!outputText) return json({ error: "A IA não retornou uma sugestão válida." }, 502);

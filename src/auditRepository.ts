@@ -17,7 +17,8 @@ const hydrateAudit = async (row: { id: string; data: Record<string, unknown> }) 
   audit.answers = await Promise.all((audit.answers ?? []).map(async (answer) => {
     const paths = (answer.photos ?? []).map((photo) => photo.replace(/^storage:/, ""));
     const photos = await Promise.all(paths.map(signedPhoto));
-    return { ...answer, photos, photoPaths: paths };
+    const evidences = answer.evidences?.length ? answer.evidences : [answer.recommendation ?? ""];
+    return { ...answer, evidences, recommendation: evidences[0] ?? "", photos, photoPaths: paths };
   }));
   return audit;
 };
@@ -62,7 +63,8 @@ export async function saveRemoteAudit(audit: Audit) {
       paths.push(path);
       newlyUploadedPaths.push(path);
     }
-    answers.push({ ...answer, photos: paths.map((path) => `storage:${path}`), photoPaths: undefined });
+    const evidences = answer.evidences?.length ? answer.evidences : [answer.recommendation ?? ""];
+    answers.push({ ...answer, evidences, recommendation: evidences[0] ?? "", photos: paths.map((path) => `storage:${path}`), photoPaths: undefined });
   }
   const now = new Date().toISOString();
   const stored = { ...audit, id: undefined, answers, updatedAt: now };
