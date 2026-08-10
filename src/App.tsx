@@ -138,7 +138,13 @@ function useRemoteData<T>(table: string, mapRow: (row: Record<string, unknown>, 
   useEffect(() => {
     const refresh = () => setRevision((value) => value + 1);
     window.addEventListener(remoteDataChangedEvent, refresh);
-    return () => window.removeEventListener(remoteDataChangedEvent, refresh);
+    window.addEventListener("focus", refresh);
+    const interval = window.setInterval(refresh, 60_000);
+    return () => {
+      window.removeEventListener(remoteDataChangedEvent, refresh);
+      window.removeEventListener("focus", refresh);
+      window.clearInterval(interval);
+    };
   }, []);
   useEffect(() => {
     let active = true;
@@ -184,14 +190,14 @@ const useRemoteDocuments = () => useRemoteData<RegisteredDocument>("audit_docume
 function useRemoteAuditsData() {
   const [items, setItems] = useState<Audit[]>([]);
   const [revision, setRevision] = useState(0);
-  useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); return () => window.removeEventListener(remoteDataChangedEvent, refresh); }, []);
+  useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); window.addEventListener("focus", refresh); const interval = window.setInterval(refresh, 60_000); return () => { window.removeEventListener(remoteDataChangedEvent, refresh); window.removeEventListener("focus", refresh); window.clearInterval(interval); }; }, []);
   useEffect(() => { let active = true; listRemoteAudits().then((data) => active && setItems(data)).catch(console.error); return () => { active = false; }; }, [revision]);
   return items;
 }
 function useRemoteChecklistsData(locationType?: LocationType, unit?: string) {
   const [items, setItems] = useState<Checklist[]>([]);
   const [revision, setRevision] = useState(0);
-  useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); return () => window.removeEventListener(remoteDataChangedEvent, refresh); }, []);
+  useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); window.addEventListener("focus", refresh); const interval = window.setInterval(refresh, 60_000); return () => { window.removeEventListener(remoteDataChangedEvent, refresh); window.removeEventListener("focus", refresh); window.clearInterval(interval); }; }, []);
   useEffect(() => { let active = true; listRemoteChecklists(locationType, unit).then((data) => active && setItems(data)).catch(console.error); return () => { active = false; }; }, [locationType, unit, revision]);
   return items;
 }
@@ -213,6 +219,20 @@ function Layout({
   onLogout: () => void;
 }) {
   const [pendingPasswordResets, setPendingPasswordResets] = useState(0);
+  const [auditNotification, setAuditNotification] = useState<{
+    id: string; audit_record_id: string; title: string; message: string;
+  } | null>(null);
+  const nav = useNavigate();
+  const loadNextAuditNotification = async () => {
+    const { data, error } = await supabase
+      .from("audit_notifications")
+      .select("id, audit_record_id, title, message")
+      .is("read_at", null)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (!error) setAuditNotification(data);
+  };
   const links = [
     [BarChart3, "/", "Dashboard"],
     [ClipboardCheck, "/auditorias", "Auditorias"],
@@ -233,8 +253,42 @@ function Layout({
     const interval = window.setInterval(refreshPendingRequests, 60_000);
     return () => { active = false; window.clearInterval(interval); };
   }, [role]);
+  useEffect(() => {
+    let active = true;
+    const refreshNotifications = async () => {
+      if (active) await loadNextAuditNotification();
+    };
+    refreshNotifications();
+    const interval = window.setInterval(refreshNotifications, 60_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, []);
+  const acknowledgeAuditNotification = async (openAudit: boolean) => {
+    if (!auditNotification) return;
+    const current = auditNotification;
+    await supabase.from("audit_notifications").update({ read_at: new Date().toISOString() }).eq("id", current.id);
+    setAuditNotification(null);
+    if (openAudit) nav(`/auditorias/${current.audit_record_id}`);
+    else await loadNextAuditNotification();
+  };
   return (
     <div className="min-h-screen">
+      {auditNotification && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="audit-notification-title">
+          <div className="card w-full max-w-lg p-5 shadow-2xl sm:p-6">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="rounded-full bg-amber-100 p-2 text-amber-700"><ClipboardCheck size={22} /></div>
+              <div>
+                <h2 id="audit-notification-title" className="text-lg font-bold text-afpesp-800">{auditNotification.title}</h2>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{auditNotification.message}</p>
+              </div>
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button className="btn-secondary" onClick={() => acknowledgeAuditNotification(false)}>Ciente</button>
+              <button className="btn-primary" onClick={() => acknowledgeAuditNotification(true)}>Abrir auditoria</button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="sticky top-0 z-30 border-b bg-afpesp-700 text-white">
         <div className={`mx-auto flex h-14 items-center px-3 sm:h-16 sm:px-4 ${mode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
           <div className="flex items-center gap-2">
@@ -555,6 +609,7 @@ function HomePage() {
     return true;
   });
   const planRealized = filteredPlan.filter((item) => item.status === "Realizada no prazo").length;
+  const planRealizedLate = filteredPlan.filter((item) => item.status === "Realizada em atraso").length;
   const planEfficacy = filteredPlan.length ? Math.round(planRealized / filteredPlan.length * 1000) / 10 : 0;
   const answers = answeredAudits.flatMap((a) => a.answers).filter((a) => a.classification);
   const counts = classes.map(
@@ -568,12 +623,12 @@ function HomePage() {
   const visibleUnits = units.filter((u) => type === "Todos" || u.type === type);
   const statusCounts = [
     filtered.filter((audit) => audit.status === "Programada").length,
-    filtered.filter((audit) => audit.status === "Em andamento").length,
+    filtered.filter((audit) => audit.status === "Em andamento" || audit.status === "Devolvido para ajustes").length,
     filtered.filter((audit) => audit.status === "Finalizada").length,
   ];
   const statusCountsByType = (locationType: LocationType) => [
     filtered.filter((audit) => audit.locationType === locationType && audit.status === "Finalizada").length,
-    filtered.filter((audit) => audit.locationType === locationType && audit.status === "Em andamento").length,
+    filtered.filter((audit) => audit.locationType === locationType && (audit.status === "Em andamento" || audit.status === "Devolvido para ajustes")).length,
     filtered.filter((audit) => audit.locationType === locationType && audit.status === "Programada").length,
   ];
   const headOfficeStatusCounts = statusCountsByType("Sede Social");
@@ -636,7 +691,7 @@ function HomePage() {
       </div>
       <h2 className="mb-1 text-lg font-bold text-slate-800">Visão geral do planejamento</h2>
       <p className="mb-3 text-sm text-slate-500">Os mesmos dados do Planejamento Anual, considerando os filtros selecionados.</p>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <Stat
           title="Total planejado"
           value={String(filteredPlan.length)}
@@ -654,6 +709,12 @@ function HomePage() {
           title="Planejadas pendentes"
           value={String(filteredPlan.filter((item) => item.status === "Planejada").length)}
           icon={<ClipboardCheck />}
+          onClick={() => nav("/planejamento")}
+        />
+        <Stat
+          title="Realizadas em atraso"
+          value={String(planRealizedLate)}
+          icon={<CalendarDays />}
           onClick={() => nav("/planejamento")}
         />
         <Stat
@@ -1033,7 +1094,7 @@ function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserN
   const [auditorFilter, setAuditorFilter] = useState("Todos");
   const initialStatus = params.get("status");
   const [status, setStatus] = useState<Audit["status"] | "Todos">(
-    initialStatus === "Programada" || initialStatus === "Em andamento" || initialStatus === "Finalizada e aguardando aprovação" || initialStatus === "Finalizada"
+    initialStatus === "Programada" || initialStatus === "Em andamento" || initialStatus === "Finalizada e aguardando aprovação" || initialStatus === "Devolvido para ajustes" || initialStatus === "Finalizada"
       ? initialStatus
       : "Todos",
   );
@@ -1108,6 +1169,7 @@ function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserN
             <option>Programada</option>
             <option>Em andamento</option>
             <option>Finalizada e aguardando aprovação</option>
+            <option>Devolvido para ajustes</option>
             <option>Finalizada</option>
           </select>
         </Field>
@@ -1212,7 +1274,7 @@ function AuditManagement({
               <div className="text-sm font-semibold text-slate-700">
                 {formatDate(a.startDate)}{a.endDate ? ` a ${formatDate(a.endDate)}` : ""}
               </div>
-              <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-green-50 text-green-700" : a.status === "Finalizada e aguardando aprovação" ? "bg-purple-50 text-purple-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
+              <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-green-50 text-green-700" : a.status === "Finalizada e aguardando aprovação" ? "bg-purple-50 text-purple-700" : a.status === "Devolvido para ajustes" ? "bg-red-50 text-red-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
                 {a.status}
               </span>
             </button>
@@ -1244,7 +1306,7 @@ function AuditManagement({
               >
                 {a.status === "Finalizada"
                   ? "Abrir auditoria"
-                  : a.status === "Em andamento"
+                  : a.status === "Em andamento" || a.status === "Devolvido para ajustes"
                     ? canManageAudit(a) ? "Continuar auditoria" : "Consultar auditoria"
                     : canManageAudit(a) ? "Editar programação" : "Consultar auditoria"}
               </button>
@@ -1676,7 +1738,7 @@ function AuditForm() {
     setAudit(updated);
   };
   const finalizeAudit = async () => {
-    if (!id || audit.status !== "Em andamento") return;
+    if (!id || !["Em andamento", "Devolvido para ajustes"].includes(audit.status)) return;
     if (!canManageAudit)
       return setError("Somente os auditores responsáveis ou o administrador podem finalizar esta auditoria.");
     if (audit.answers.some((answer) => !answer.question.trim()))
@@ -1693,6 +1755,9 @@ function AuditForm() {
       submittedBy: auditorAtual,
       approvedAt: undefined,
       approvedBy: undefined,
+      returnedAt: undefined,
+      returnedBy: undefined,
+      returnReason: undefined,
       updatedAt: new Date().toISOString(),
     };
     await saveRemoteAudit({ ...updated, id });
@@ -1710,8 +1775,10 @@ function AuditForm() {
   };
   const returnForAdjustments = async () => {
     if (!id || !isAdmin || audit.status !== "Finalizada e aguardando aprovação") return;
+    const reason = prompt("Informe aos auditores quais ajustes devem ser realizados:")?.trim();
+    if (!reason) return setError("Informe o motivo da devolução para orientar os auditores responsáveis.");
     if (!confirm("Devolver esta auditoria aos responsáveis para ajustes?")) return;
-    const updated: Audit = { ...audit, status: "Em andamento", approvedAt: undefined, approvedBy: undefined, updatedAt: new Date().toISOString() };
+    const updated: Audit = { ...audit, status: "Devolvido para ajustes", approvedAt: undefined, approvedBy: undefined, returnedAt: new Date().toISOString(), returnedBy: auditorAtual, returnReason: reason, updatedAt: new Date().toISOString() };
     await saveRemoteAudit({ ...updated, id });
     notifyRemoteDataChanged();
     setAudit(updated);
@@ -1850,7 +1917,7 @@ function AuditForm() {
                 Iniciar auditoria
               </button>
             )}
-            {id && audit.status === "Em andamento" && profileLoaded && canManageAudit && (
+            {id && ["Em andamento", "Devolvido para ajustes"].includes(audit.status) && profileLoaded && canManageAudit && (
               <button className="btn bg-blue-600 text-white hover:bg-blue-700" onClick={finalizeAudit}>
                 <ClipboardCheck size={16} />
                 Enviar para aprovação
@@ -2037,6 +2104,13 @@ function AuditForm() {
           {audit.status === "Programada" && (
             <div className="card text-center">
               <p className="text-slate-600">A auditoria está programada. Clique em <b>Iniciar auditoria</b> para abrir o checklist e começar o preenchimento.</p>
+            </div>
+          )}
+          {audit.status === "Devolvido para ajustes" && (
+            <div className="card border-red-200 bg-red-50">
+              <h3 className="font-bold text-red-800">Ajustes solicitados pelo administrador</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-red-700">{audit.returnReason || "Consulte o administrador para verificar os ajustes solicitados."}</p>
+              <p className="mt-2 text-xs text-red-600">Após corrigir e salvar, clique em <b>Enviar para aprovação</b>.</p>
             </div>
           )}
           {audit.status !== "Programada" && (
@@ -2665,49 +2739,77 @@ type PasswordResetRequest = {
   audit_profiles: { full_name: string } | null;
 };
 
-const planStatuses: PlanStatus[] = ["Planejada", "Realizada no prazo", "Reprogramada", "Não realizada"];
+const planStatuses: PlanStatus[] = ["Planejada", "Realizada no prazo", "Realizada em atraso", "Reprogramada", "Não realizada"];
 const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const splitPlanAuditors = (value: string) => value.split(/[,/]/).map((name) => name.trim()).filter(Boolean);
+function AuditorPlanSelect({ value, options, onChange }: { value: string; options: Auditor[]; onChange: (value: string) => void }) {
+  const selected = splitPlanAuditors(value);
+  return <div className="space-y-2">
+    <select className="field" value="" onChange={(event) => {
+      const name = event.target.value;
+      if (name && !selected.includes(name)) onChange([...selected, name].join(", "));
+    }}>
+      <option value="">Selecione um auditor para adicionar</option>
+      {options.filter((auditor) => !selected.includes(auditor.name)).map((auditor) => <option key={auditor.remoteId ?? auditor.id} value={auditor.name}>{auditor.name}</option>)}
+    </select>
+    {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((name) => <span key={name} className="inline-flex items-center gap-1 rounded-full bg-afpesp-50 px-2.5 py-1 text-xs font-semibold text-afpesp-700">{name}<button type="button" aria-label={`Remover ${name}`} onClick={() => onChange(selected.filter((item) => item !== name).join(", "))}><X size={13} /></button></span>)}</div>}
+  </div>;
+}
 function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
   const [items, setItems] = useState<AnnualPlanItem[]>([]);
   const [year, setYear] = useState(2026);
   const [monthFilter, setMonthFilter] = useState<number | "Todos">("Todos");
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState({ process: "", month: new Date().getMonth() + 1, auditor: "" });
+  const planningUnits = useRemoteUnits().filter((unit) => unit.active).sort((a, b) => `${a.type} ${a.name}`.localeCompare(`${b.type} ${b.name}`, "pt-BR"));
+  const planningAuditors = useRemoteAuditors().filter((auditor) => auditor.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const load = async () => {
     const { data, error } = await supabase.from("audit_annual_plan_items").select("id,process,planned_month,planned_year,auditor,status,audit_record_id,notes").eq("planned_year", year).order("planned_month").order("process");
     if (error) return setMessage(error.message);
     setItems((data ?? []).map((row) => ({ id: row.id, process: row.process, month: row.planned_month, year: row.planned_year, auditor: row.auditor, status: row.status as PlanStatus, auditId: row.audit_record_id ?? undefined, notes: row.notes })));
   };
-  useEffect(() => { load(); }, [year]);
+  useEffect(() => {
+    load();
+    const refresh = () => load();
+    window.addEventListener(remoteDataChangedEvent, refresh);
+    window.addEventListener("focus", refresh);
+    const interval = window.setInterval(refresh, 60_000);
+    return () => { window.removeEventListener(remoteDataChangedEvent, refresh); window.removeEventListener("focus", refresh); window.clearInterval(interval); };
+  }, [year]);
   const updateItem = async (item: AnnualPlanItem, changes: Partial<AnnualPlanItem>) => {
     const next = { ...item, ...changes };
     const { error } = await supabase.from("audit_annual_plan_items").update({ process: next.process, planned_month: next.month, auditor: next.auditor, status: next.status, notes: next.notes ?? "" }).eq("id", item.id);
     if (error) return setMessage(error.message);
     setItems((current) => current.map((row) => row.id === item.id ? next : row));
+    notifyRemoteDataChanged();
     setMessage("Planejamento atualizado.");
   };
   const add = async () => {
     if (!draft.process.trim()) return setMessage("Informe o processo ou local da auditoria planejada.");
+    if (!draft.auditor.trim()) return setMessage("Selecione ao menos um auditor responsável.");
     const { data: auth } = await supabase.auth.getUser();
     const { error } = await supabase.from("audit_annual_plan_items").insert({ process: draft.process.trim(), planned_month: draft.month, planned_year: year, auditor: draft.auditor.trim(), status: "Planejada", created_by: auth.user?.id });
     if (error) return setMessage(error.message);
-    setDraft({ process: "", month: draft.month, auditor: "" }); setMessage("Item incluído no plano anual."); load();
+    setDraft({ process: "", month: draft.month, auditor: "" }); setMessage("Item incluído no plano anual."); notifyRemoteDataChanged(); load();
   };
   const remove = async (item: AnnualPlanItem) => {
     if (!confirm(`Excluir ${item.process} do planejamento?`)) return;
     const { error } = await supabase.from("audit_annual_plan_items").delete().eq("id", item.id);
     if (error) return setMessage(error.message);
     setItems((current) => current.filter((row) => row.id !== item.id));
+    notifyRemoteDataChanged();
   };
   const filteredItems = monthFilter === "Todos" ? items : items.filter((item) => item.month === monthFilter);
   const realized = filteredItems.filter((item) => item.status === "Realizada no prazo").length;
+  const realizedLate = filteredItems.filter((item) => item.status === "Realizada em atraso").length;
   const efficacy = filteredItems.length ? Math.round(realized / filteredItems.length * 1000) / 10 : 0;
   const monthlyPlanned = monthNames.map((_, index) => items.filter((item) => item.month === index + 1).length);
   const monthlyRealized = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada no prazo").length);
+  const monthlyRealizedLate = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada em atraso").length);
   const visibleMonthIndexes = monthFilter === "Todos" ? monthNames.map((_, index) => index) : [monthFilter - 1];
   return <>
     <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." />
-    <div className="mb-6 grid gap-4 sm:grid-cols-3"><Stat title="Planejadas" value={String(filteredItems.length)} icon={<CalendarDays size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
+    <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Stat title="Planejadas" value={String(filteredItems.length)} icon={<CalendarDays size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Realizadas em atraso" value={String(realizedLate)} icon={<CalendarDays size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
     <div className="card mb-6">
       <h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2>
       <p className="mb-4 text-sm text-slate-500">Passe o mouse ou toque em uma barra para consultar os locais/processos daquele mês.</p>
@@ -2718,9 +2820,10 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
             datasets: [
               { label: "Planejadas", data: visibleMonthIndexes.map((index) => monthlyPlanned[index]), backgroundColor: "#93c5fd", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
               { label: "Realizadas no prazo", data: visibleMonthIndexes.map((index) => monthlyRealized[index]), backgroundColor: "#15803d", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
+              { label: "Realizadas em atraso", data: visibleMonthIndexes.map((index) => monthlyRealizedLate[index]), backgroundColor: "#dc2626", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
             ],
           }}
-          options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const rows = items.filter((item) => item.month === monthIndex + 1 && (context.datasetIndex === 0 || item.status === "Realizada no prazo")); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
+          options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const status = context.datasetIndex === 1 ? "Realizada no prazo" : context.datasetIndex === 2 ? "Realizada em atraso" : null; const rows = items.filter((item) => item.month === monthIndex + 1 && (!status || item.status === status)); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
         />
       </div>
       <div className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
@@ -2728,7 +2831,7 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
         <select aria-label="Filtrar por mês" className="field sm:w-40" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value === "Todos" ? "Todos" : Number(e.target.value))}><option value="Todos">Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select>
       </div>
     </div>
-    {isAdmin && <div className="card mb-6"><h2 className="mb-4 text-lg font-bold text-afpesp-700">Incluir item no planejamento</h2><div className="grid gap-3 md:grid-cols-[2fr_.7fr_1.2fr_auto]"><Field label="Processo / local"><input className="field" value={draft.process} onChange={(e) => setDraft({ ...draft, process: e.target.value })} /></Field><Field label="Mês"><select className="field" value={draft.month} onChange={(e) => setDraft({ ...draft, month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></Field><Field label="Auditor(es)"><input className="field" value={draft.auditor} onChange={(e) => setDraft({ ...draft, auditor: e.target.value })} /></Field><button className="btn-primary self-end" onClick={add}><Plus size={16} /> Incluir</button></div></div>}
+    {isAdmin && <div className="card mb-6"><h2 className="mb-4 text-lg font-bold text-afpesp-700">Incluir item no planejamento</h2><div className="grid gap-3 md:grid-cols-[2fr_.7fr_1.2fr_auto]"><Field label="Processo / local"><select className="field" value={draft.process} onChange={(e) => setDraft({ ...draft, process: e.target.value })}><option value="">Selecione o local ou processo</option>{planningUnits.map((unit) => <option key={unit.remoteId ?? unit.id} value={unit.name}>{unit.type} — {unit.name}</option>)}</select></Field><Field label="Mês"><select className="field" value={draft.month} onChange={(e) => setDraft({ ...draft, month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></Field><Field label="Auditor(es)"><AuditorPlanSelect value={draft.auditor} options={planningAuditors} onChange={(auditor) => setDraft({ ...draft, auditor })} /></Field><button className="btn-primary self-end" onClick={add}><Plus size={16} /> Incluir</button></div></div>}
     {message && <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
     <div className="card overflow-hidden p-0"><div className="grid grid-cols-[1fr_70px] gap-3 border-b bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px]"><span>Processo / local</span><span>Mês</span><span className="hidden sm:block">Auditor(es)</span><span className="hidden sm:block">Status</span><span /></div><div className="divide-y">{filteredItems.map((item) => <div key={item.id} className="grid grid-cols-[1fr_70px] gap-3 p-3 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px] sm:items-center"><input className="field" readOnly={!isAdmin} value={item.process} onBlur={(e) => isAdmin && e.target.value !== item.process && updateItem(item, { process: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, process: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.month} onChange={(e) => updateItem(item, { month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select><input className="field sm:block" readOnly={!isAdmin} value={item.auditor} onBlur={(e) => isAdmin && updateItem(item, { auditor: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, auditor: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.status} onChange={(e) => updateItem(item, { status: e.target.value as PlanStatus })}>{planStatuses.map((status) => <option key={status}>{status}</option>)}</select>{isAdmin && <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => remove(item)} aria-label={`Excluir ${item.process}`}><Trash2 size={17} /></button>}</div>)}</div></div>
   </>;
