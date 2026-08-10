@@ -302,7 +302,14 @@ function Login({ onLogin }: { onLogin: (mode: LayoutMode) => void }) {
     const redirectTo = "https://lljafpesp.github.io/sistema-auditorias-afpesp/";
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
     setLoading(false);
-    setMessage(error ? `Não foi possível enviar: ${error.message}` : "Solicitação enviada. Verifique também a caixa de spam. O link funciona para endereços autorizados no sistema.");
+    if (error) {
+      const rateLimitReached = error.message.toLowerCase().includes("rate limit");
+      setMessage(rateLimitReached
+        ? "O limite temporário de envio de e-mails foi atingido. Aguarde e tente novamente mais tarde. O administrador também pode definir uma senha temporária na tela de usuários."
+        : `Não foi possível enviar o e-mail de recuperação: ${error.message}`);
+      return;
+    }
+    setMessage("Solicitação enviada. Verifique também a caixa de spam. O link funciona para endereços autorizados no sistema.");
   };
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
@@ -2665,9 +2672,28 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
   const monthlyRealized = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada no prazo").length);
   const visibleMonthIndexes = monthFilter === "Todos" ? monthNames.map((_, index) => index) : [monthFilter - 1];
   return <>
-    <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." action={<div className="flex gap-2"><select className="field w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}><option>2026</option><option>2027</option><option>2028</option></select><select className="field w-36" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value === "Todos" ? "Todos" : Number(e.target.value))}><option value="Todos">Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></div>} />
+    <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." />
     <div className="mb-6 grid gap-4 sm:grid-cols-3"><Stat title="Planejadas" value={String(filteredItems.length)} icon={<CalendarDays size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
-    <div className="card mb-6"><h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2><p className="mb-4 text-sm text-slate-500">Passe o mouse ou toque em uma barra para consultar os locais/processos daquele mês.</p><div className="h-72"><Bar data={{ labels: visibleMonthIndexes.map((index) => monthNames[index]), datasets: [{ label: "Planejadas", data: visibleMonthIndexes.map((index) => monthlyPlanned[index]), backgroundColor: "#93c5fd" }, { label: "Realizadas no prazo", data: visibleMonthIndexes.map((index) => monthlyRealized[index]), backgroundColor: "#15803d" }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const rows = items.filter((item) => item.month === monthIndex + 1 && (context.datasetIndex === 0 || item.status === "Realizada no prazo")); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }} /></div></div>
+    <div className="card mb-6">
+      <h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2>
+      <p className="mb-4 text-sm text-slate-500">Passe o mouse ou toque em uma barra para consultar os locais/processos daquele mês.</p>
+      <div className="h-72">
+        <Bar
+          data={{
+            labels: visibleMonthIndexes.map((index) => monthNames[index]),
+            datasets: [
+              { label: "Planejadas", data: visibleMonthIndexes.map((index) => monthlyPlanned[index]), backgroundColor: "#93c5fd", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
+              { label: "Realizadas no prazo", data: visibleMonthIndexes.map((index) => monthlyRealized[index]), backgroundColor: "#15803d", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
+            ],
+          }}
+          options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const rows = items.filter((item) => item.month === monthIndex + 1 && (context.datasetIndex === 0 || item.status === "Realizada no prazo")); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
+        />
+      </div>
+      <div className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+        <select aria-label="Filtrar por ano" className="field sm:w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}><option>2026</option><option>2027</option><option>2028</option></select>
+        <select aria-label="Filtrar por mês" className="field sm:w-40" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value === "Todos" ? "Todos" : Number(e.target.value))}><option value="Todos">Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select>
+      </div>
+    </div>
     {isAdmin && <div className="card mb-6"><h2 className="mb-4 text-lg font-bold text-afpesp-700">Incluir item no planejamento</h2><div className="grid gap-3 md:grid-cols-[2fr_.7fr_1.2fr_auto]"><Field label="Processo / local"><input className="field" value={draft.process} onChange={(e) => setDraft({ ...draft, process: e.target.value })} /></Field><Field label="Mês"><select className="field" value={draft.month} onChange={(e) => setDraft({ ...draft, month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></Field><Field label="Auditor(es)"><input className="field" value={draft.auditor} onChange={(e) => setDraft({ ...draft, auditor: e.target.value })} /></Field><button className="btn-primary self-end" onClick={add}><Plus size={16} /> Incluir</button></div></div>}
     {message && <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
     <div className="card overflow-hidden p-0"><div className="grid grid-cols-[1fr_70px] gap-3 border-b bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px]"><span>Processo / local</span><span>Mês</span><span className="hidden sm:block">Auditor(es)</span><span className="hidden sm:block">Status</span><span /></div><div className="divide-y">{filteredItems.map((item) => <div key={item.id} className="grid grid-cols-[1fr_70px] gap-3 p-3 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px] sm:items-center"><input className="field" readOnly={!isAdmin} value={item.process} onBlur={(e) => isAdmin && e.target.value !== item.process && updateItem(item, { process: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, process: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.month} onChange={(e) => updateItem(item, { month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select><input className="field sm:block" readOnly={!isAdmin} value={item.auditor} onBlur={(e) => isAdmin && updateItem(item, { auditor: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, auditor: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.status} onChange={(e) => updateItem(item, { status: e.target.value as PlanStatus })}>{planStatuses.map((status) => <option key={status}>{status}</option>)}</select>{isAdmin && <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => remove(item)} aria-label={`Excluir ${item.process}`}><Trash2 size={17} /></button>}</div>)}</div></div>
