@@ -47,6 +47,7 @@ import type {
   Answer,
   AnnualPlanItem,
   Audit,
+  AuditSummary,
   Auditor,
   Checklist,
   ChecklistItem,
@@ -61,7 +62,7 @@ import { exportDocx } from "./reports";
 import { supabase } from "./supabase";
 import {
   createRemoteChecklist, deleteRemoteAudit, deleteRemoteChecklist, getRemoteAudit,
-  listRemoteAudits, listRemoteChecklists, saveRemoteAudit,
+  listRemoteAudits, listRemoteAuditSummaries, listRemoteChecklists, saveRemoteAudit,
 } from "./auditRepository";
 const valueLabelsPlugin: Plugin = {
   id: "valueLabels",
@@ -192,6 +193,13 @@ function useRemoteAuditsData() {
   const [revision, setRevision] = useState(0);
   useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); window.addEventListener("focus", refresh); const interval = window.setInterval(refresh, 60_000); return () => { window.removeEventListener(remoteDataChangedEvent, refresh); window.removeEventListener("focus", refresh); window.clearInterval(interval); }; }, []);
   useEffect(() => { let active = true; listRemoteAudits().then((data) => active && setItems(data)).catch(console.error); return () => { active = false; }; }, [revision]);
+  return items;
+}
+function useRemoteAuditSummariesData() {
+  const [items, setItems] = useState<AuditSummary[]>([]);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => { const refresh = () => setRevision((value) => value + 1); window.addEventListener(remoteDataChangedEvent, refresh); window.addEventListener("focus", refresh); const interval = window.setInterval(refresh, 60_000); return () => { window.removeEventListener(remoteDataChangedEvent, refresh); window.removeEventListener("focus", refresh); window.clearInterval(interval); }; }, []);
+  useEffect(() => { let active = true; listRemoteAuditSummaries().then((data) => active && setItems(data)).catch(console.error); return () => { active = false; }; }, [revision]);
   return items;
 }
 function useRemoteChecklistsData(locationType?: LocationType, unit?: string) {
@@ -1099,7 +1107,7 @@ function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserN
       : "Todos",
   );
   const units = useRemoteUnits().filter((item) => item.active && (type === "Todos" || item.type === type));
-  const audits = useRemoteAuditsData();
+  const audits = useRemoteAuditSummariesData();
   const auditors = useRemoteAuditors().filter((auditor) => auditor.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   useEffect(() => setUnit("Todos"), [type]);
   const filtered = audits.filter(
@@ -1200,8 +1208,9 @@ function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserN
           onOpen={(id) => nav(`/auditorias/${id}`)}
           onStart={async (audit) => {
             if (!audit.id || audit.status !== "Programada") return;
+            const fullAudit = await getRemoteAudit(String(audit.id));
             const updated: Audit = {
-              ...audit,
+              ...fullAudit,
               status: "Em andamento",
               updatedAt: new Date().toISOString(),
             };
@@ -1223,9 +1232,9 @@ function AuditManagement({
   isAdmin,
   currentUserName,
 }: {
-  audits: Audit[];
+  audits: AuditSummary[];
   onOpen: (id: number | string) => void;
-  onStart: (audit: Audit) => Promise<void>;
+  onStart: (audit: AuditSummary) => Promise<void>;
   isAdmin: boolean;
   currentUserName: string;
 }) {
@@ -1235,7 +1244,7 @@ function AuditManagement({
   const totalPages = Math.max(1, Math.ceil(audits.length / pageSize));
   const auditListKey = audits.map((audit) => audit.id).join("|");
   const pageAudits = audits.slice((page - 1) * pageSize, page * pageSize);
-  const canManageAudit = (audit: Audit) =>
+  const canManageAudit = (audit: AuditSummary) =>
     isAdmin || audit.auditors.some((auditor) => normalize(auditor) === normalize(currentUserName));
   useEffect(() => {
     setPage(1);
@@ -1299,7 +1308,7 @@ function AuditManagement({
                   <ClipboardCheck size={16} /> Iniciar auditoria
                 </button>
               )}
-              <button
+              {canManageAudit(a) ? <button
                 type="button"
                 className="btn-primary w-full sm:w-auto"
                 onClick={(event) => { event.stopPropagation(); onOpen(a.id!); }}
@@ -1309,19 +1318,19 @@ function AuditManagement({
                   : a.status === "Em andamento" || a.status === "Devolvido para ajustes"
                     ? canManageAudit(a) ? "Continuar auditoria" : "Consultar auditoria"
                     : canManageAudit(a) ? "Editar programação" : "Consultar auditoria"}
-              </button>
-              <button
+              </button> : <span className="rounded-lg bg-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-600">Somente responsáveis podem abrir</span>}
+              {canManageAudit(a) && <button
                 type="button"
                 className="btn-secondary w-full sm:w-auto"
-                onClick={(event) => { event.stopPropagation(); downloadAuditChecklistExcel(a); }}
+                onClick={async (event) => { event.stopPropagation(); downloadAuditChecklistExcel(await getRemoteAudit(String(a.id))); }}
               >
                 <FileDown size={16} /> Baixar checklist Excel
-              </button>
-              {a.status === "Finalizada" && (
+              </button>}
+              {a.status === "Finalizada" && canManageAudit(a) && (
                 <button
                   type="button"
                   className="btn-secondary w-full sm:w-auto"
-                  onClick={(event) => { event.stopPropagation(); exportDocx(a); }}
+                  onClick={async (event) => { event.stopPropagation(); exportDocx(await getRemoteAudit(String(a.id))); }}
                 >
                   <Download size={16} /> Baixar relatório Word
                 </button>
@@ -1592,7 +1601,8 @@ function AuditForm() {
   const isAssignedAuditor = audit.auditors.some(
     (name) => normalizeAuditorName(name) === normalizeAuditorName(auditorAtual),
   );
-  const canManageAudit = !id || isAdmin || isAssignedAuditor;
+  const editableStatus = ["Programada", "Em andamento", "Devolvido para ajustes"].includes(audit.status);
+  const canManageAudit = !id || (editableStatus && (isAdmin || isAssignedAuditor));
   const readOnly = !canManageAudit;
   useEffect(() => {
     if (id) getRemoteAudit(id).then(setAudit).catch((error) => setError(error.message));
