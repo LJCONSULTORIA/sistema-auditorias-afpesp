@@ -84,6 +84,48 @@ const documentTable = (rows: { requirement: string; document: DocumentReference 
   ],
 });
 
+const summaryTable = (a: Audit, counts: { conforme: number; oportunidade: number; naoConforme: number; risco: number }) => {
+  const itemAndRequirement = (classification: Answer["classification"]) => a.answers
+    .map((answer, index) => ({ answer, index }))
+    .filter(({ answer }) => answer.classification === classification)
+    .map(({ answer, index }) => `Item 10.${index + 1} — requisito ${splitRequirements(answer.requirement).join("; ") || "não informado"}`)
+    .join("\n");
+  const rows = [
+    { label: "Conformidade (s)", quantity: counts.conforme, details: "", registry: "" },
+    { label: "Oportunidade (s) de melhoria", quantity: counts.oportunidade, details: "", registry: "" },
+    { label: "Não conformidade (s)", quantity: counts.naoConforme, details: itemAndRequirement("Não Conforme"), registry: "" },
+    { label: "Risco (s).", quantity: counts.risco, details: "", registry: "" },
+  ];
+  const cell = (value: string, width: number, alignment: (typeof AlignmentType)[keyof typeof AlignmentType] = AlignmentType.LEFT, bold = false) => new TableCell({
+    width: { size: width, type: WidthType.DXA },
+    verticalAlign: VerticalAlign.CENTER,
+    children: value.split("\n").map((line) => new Paragraph({
+      alignment,
+      spacing: { before: 60, after: 60 },
+      children: [run(line, { bold, size: 20, italics: line === EDITABLE, color: line === EDITABLE ? "7F7F7F" : undefined })],
+    })),
+  });
+  return new Table({
+    width: { size: 9498, type: WidthType.DXA },
+    columnWidths: [1940, 1400, 4858, 1300],
+    borders,
+    rows: [
+      new TableRow({ tableHeader: true, height: { value: 620, rule: HeightRule.ATLEAST }, children: [
+        cell("Apontamento", 1940, AlignmentType.CENTER, true),
+        cell("Quantidade", 1400, AlignmentType.CENTER, true),
+        cell("Item e requisito", 4858, AlignmentType.CENTER, true),
+        cell("Registro", 1300, AlignmentType.CENTER, true),
+      ] }),
+      ...rows.map((row) => new TableRow({ height: { value: 620, rule: HeightRule.ATLEAST }, children: [
+        cell(row.label, 1940),
+        cell(String(row.quantity).padStart(2, "0"), 1400, AlignmentType.CENTER),
+        cell(row.details, 4858),
+        cell(row.registry, 1300, AlignmentType.CENTER),
+      ] })),
+    ],
+  });
+};
+
 export async function buildModG250Report(a: Audit) {
   const baseUrl = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env?.BASE_URL ?? "/";
   const logo = await imageBytes(`${baseUrl}brasao-afpesp.png`);
@@ -115,11 +157,7 @@ export async function buildModG250Report(a: Audit) {
     sectionTitle(7, "Resultado das Avaliações anteriores"), editable(),
     sectionTitle(8, "Sumário da auditoria"),
     paragraph("Quantidade de apontamentos registrados na auditoria:"),
-    new Paragraph({ text: `${counts.conforme} Conformidade(s);`, bullet: { level: 0 }, spacing: { after: 50 } }),
-    new Paragraph({ text: `${counts.oportunidade} Oportunidade(s) de melhoria;`, bullet: { level: 0 }, spacing: { after: 50 } }),
-    new Paragraph({ text: `${counts.naoConforme} Não conformidade(s);`, bullet: { level: 0 }, spacing: { after: 50 } }),
-    new Paragraph({ text: `${counts.risco} Risco(s).`, bullet: { level: 0 }, spacing: { after: 120 } }),
-    ...(counts.naoConforme ? a.answers.map((answer, index) => ({ answer, index })).filter(({ answer }) => answer.classification === "Não Conforme").map(({ answer, index }, ncIndex) => paragraph(`${ncIndex + 1}. Item 10.${index + 1} — requisito ${clean(answer.requirement)} — RAC: ${EDITABLE}`)) : [paragraph("Não foram registradas não conformidades nesta auditoria.")]),
+    summaryTable(a, counts),
     sectionTitle(9, "Parecer da equipe auditora (conclusão, pontos positivos e principais pontos de melhorias)"), editable(),
     sectionTitle(10, "Processos verificados"),
     paragraph("São apresentadas a seguir as constatações, evidências e classificações dos itens auditados."),
