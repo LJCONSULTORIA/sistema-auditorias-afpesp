@@ -1774,7 +1774,7 @@ function AuditForm() {
     setSuccess("Auditoria aprovada e finalizada.");
   };
   const returnForAdjustments = async () => {
-    if (!id || !isAdmin || audit.status !== "Finalizada e aguardando aprovação") return;
+    if (!id || !isAdmin || !["Finalizada e aguardando aprovação", "Finalizada"].includes(audit.status)) return;
     const reason = prompt("Informe aos auditores quais ajustes devem ser realizados:")?.trim();
     if (!reason) return setError("Informe o motivo da devolução para orientar os auditores responsáveis.");
     if (!confirm("Devolver esta auditoria aos responsáveis para ajustes?")) return;
@@ -1904,6 +1904,9 @@ function AuditForm() {
                 <Download size={16} />
                 Gerar relatório
               </button>
+            )}
+            {id && audit.status === "Finalizada" && isAdmin && (
+              <button className="btn-secondary" onClick={returnForAdjustments}>Reabrir para ajustes</button>
             )}
             {id && audit.status !== "Finalizada" && isAdmin && (
               <button className="btn border border-red-300 bg-red-50 text-red-700 hover:bg-red-100" onClick={deleteEditableAudit}>
