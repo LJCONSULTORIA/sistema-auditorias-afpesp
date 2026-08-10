@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { Answer, Audit, Checklist, LocationType } from "./types";
+import type { Answer, Audit, AuditSummary, Checklist, LocationType } from "./types";
 
 const bucket = "audit-evidence";
 const userId = async () => {
@@ -26,6 +26,21 @@ export async function listRemoteAudits() {
   const { data, error } = await supabase.from("audit_records").select("id,data").order("updated_at", { ascending: false });
   if (error) throw error;
   return Promise.all((data ?? []).map((row) => hydrateAudit(row as { id: string; data: Record<string, unknown> })));
+}
+export async function listRemoteAuditSummaries(): Promise<AuditSummary[]> {
+  const { data, error } = await supabase.from("audit_record_summaries").select("id,location_type,unit,checklist_name,auditors,start_date,end_date,status,updated_at").order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    locationType: row.location_type as LocationType,
+    unit: String(row.unit ?? ""),
+    checklistName: String(row.checklist_name ?? ""),
+    auditors: Array.isArray(row.auditors) ? row.auditors.map(String) : [],
+    startDate: String(row.start_date ?? ""),
+    endDate: String(row.end_date ?? ""),
+    status: row.status as Audit["status"],
+    updatedAt: String(row.updated_at ?? ""),
+  }));
 }
 export async function getRemoteAudit(id: string) {
   const { data, error } = await supabase.from("audit_records").select("id,data").eq("id", id).single();
