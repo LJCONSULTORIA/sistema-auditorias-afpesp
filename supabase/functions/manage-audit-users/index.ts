@@ -11,11 +11,16 @@ type UserAction =
   | { action: "create"; email: string; fullName: string; role?: "admin" | "auditor" }
   | { action: "update"; userId: string; fullName: string; role: "admin" | "auditor" }
   | { action: "set_active"; userId: string; active: boolean }
-  | { action: "reset_temporary_password"; userId: string }
+  | { action: "reset_temporary_password"; userId: string; requestId?: string }
+  | { action: "cancel_password_reset"; requestId: string }
   | { action: "delete"; userId: string }
   | { action: "delete_pending"; allowedUserId: string };
 
-const temporaryPassword = "AFPESP@1234";
+const createTemporaryPassword = () => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return `Af!${Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")}`;
+};
 
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS")
@@ -53,12 +58,18 @@ Deno.serve(async (request: Request) => {
     const payload = (await request.json()) as UserAction;
 
     if (payload.action === "list") {
-      const { data, error } = await admin
+      const { data: users, error } = await admin
         .from("audit_allowed_users")
         .select("id, email, full_name, role, active, auth_user_id, created_at")
         .order("full_name");
       if (error) throw error;
-      return response({ users: data });
+      const { data: requests, error: requestError } = await admin
+        .from("audit_password_reset_requests")
+        .select("id, user_id, status, requested_at, audit_profiles!audit_password_reset_requests_user_id_fkey(full_name)")
+        .eq("status", "Pendente")
+        .order("requested_at", { ascending: false });
+      if (requestError) throw requestError;
+      return response({ users, passwordResetRequests: requests });
     }
 
     if (payload.action === "create") {
@@ -72,6 +83,7 @@ Deno.serve(async (request: Request) => {
         .upsert({ email, full_name: fullName, role, active: true }, { onConflict: "email" });
       if (allowError) throw allowError;
 
+      const temporaryPassword = createTemporaryPassword();
       const { data, error } = await admin.auth.admin.createUser({
         email,
         password: temporaryPassword,
@@ -79,7 +91,7 @@ Deno.serve(async (request: Request) => {
         user_metadata: { full_name: fullName },
       });
       if (error) throw error;
-      return response({ userId: data.user.id, temporaryPasswordRequired: true }, 201);
+      return response({ userId: data.user.id, temporaryPasswordRequired: true, temporaryPassword }, 201);
     }
 
     if (payload.action === "update") {
@@ -129,6 +141,7 @@ Deno.serve(async (request: Request) => {
     }
 
     if (payload.action === "reset_temporary_password") {
+      const temporaryPassword = createTemporaryPassword();
       const { error } = await admin.auth.admin.updateUserById(payload.userId, {
         password: temporaryPassword,
       });
@@ -138,7 +151,26 @@ Deno.serve(async (request: Request) => {
         .update({ must_change_password: true })
         .eq("id", payload.userId);
       if (profileUpdateError) throw profileUpdateError;
-      return response({ success: true, temporaryPasswordRequired: true });
+      if (payload.requestId) {
+        const { error: requestError } = await admin
+          .from("audit_password_reset_requests")
+          .update({ status: "Concluída", resolved_at: new Date().toISOString(), resolved_by: authData.user.id })
+          .eq("id", payload.requestId)
+          .eq("user_id", payload.userId)
+          .eq("status", "Pendente");
+        if (requestError) throw requestError;
+      }
+      return response({ success: true, temporaryPasswordRequired: true, temporaryPassword });
+    }
+
+    if (payload.action === "cancel_password_reset") {
+      const { error } = await admin
+        .from("audit_password_reset_requests")
+        .update({ status: "Cancelada", resolved_at: new Date().toISOString(), resolved_by: authData.user.id })
+        .eq("id", payload.requestId)
+        .eq("status", "Pendente");
+      if (error) throw error;
+      return response({ success: true });
     }
 
     if (payload.action === "delete") {
