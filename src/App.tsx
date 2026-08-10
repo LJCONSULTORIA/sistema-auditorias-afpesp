@@ -19,6 +19,7 @@ import {
   Plus,
   Save,
   Settings,
+  Sparkles,
   Smartphone,
   Trash2,
   Users,
@@ -1441,6 +1442,14 @@ function AuditForm() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [aiLoadingQuestionId, setAiLoadingQuestionId] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<Record<string, {
+    finding: string;
+    evidence: string;
+    model: string;
+    promptVersion: string;
+    requestedAt: string;
+  }>>({});
   const [audit, setAudit] = useState<Audit>({
     locationType,
     unit: selectedUnit,
@@ -1627,6 +1636,35 @@ function AuditForm() {
       ...a,
       answers: a.answers.map((x, j) => (j === i ? { ...x, ...p } : x)),
     }));
+  const requestAiReview = async (index: number) => {
+    const answer = audit.answers[index];
+    if (!navigator.onLine)
+      return setError("A revisão com IA está disponível somente quando o dispositivo estiver conectado à internet.");
+    if (!id)
+      return setError("Salve a auditoria antes de solicitar a revisão com IA.");
+    if (!answer.finding.trim() && !answer.recommendation.trim())
+      return setError("Preencha a descrição ou a evidência antes de solicitar a revisão com IA.");
+    setError("");
+    setAiLoadingQuestionId(answer.id);
+    try {
+      const { data, error: functionError } = await supabase.functions.invoke("review-audit-text", {
+        body: { auditId: id, answerId: answer.id, question: answer.question, requirement: answer.requirement, classification: answer.classification, finding: answer.finding, evidence: answer.recommendation },
+      });
+      if (functionError) throw functionError;
+      if (!data?.suggestion?.finding || !data?.suggestion?.evidence) throw new Error(data?.error || "A IA não retornou uma sugestão válida.");
+      setAiSuggestions((current) => ({ ...current, [answer.id]: { finding: data.suggestion.finding, evidence: data.suggestion.evidence, model: data.model, promptVersion: data.promptVersion, requestedAt: new Date().toISOString() } }));
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Não foi possível revisar o texto com IA.");
+    } finally { setAiLoadingQuestionId(null); }
+  };
+  const acceptAiReview = (index: number) => {
+    const answer = audit.answers[index];
+    const suggestion = aiSuggestions[answer.id];
+    if (!suggestion) return;
+    update(index, { finding: suggestion.finding, recommendation: suggestion.evidence, aiReviews: [...(answer.aiReviews ?? []), { requestedAt: suggestion.requestedAt, acceptedAt: new Date().toISOString(), originalFinding: answer.finding, originalEvidence: answer.recommendation, suggestedFinding: suggestion.finding, suggestedEvidence: suggestion.evidence, accepted: true, model: suggestion.model, promptVersion: suggestion.promptVersion }] });
+    setAiSuggestions((current) => { const next = { ...current }; delete next[answer.id]; return next; });
+    setSuccess("Sugestão da IA aplicada. Revise o conteúdo e clique em Salvar para registrá-lo.");
+  };
   const addQuestion = (afterIndex: number) => {
     const newQuestion: Answer = {
       id: crypto.randomUUID(),
@@ -2034,6 +2072,18 @@ function AuditForm() {
                   />
                 </Field>
                 </div>
+                {!readOnly && <div className="md:col-span-2">
+                  <button type="button" className="btn-secondary" disabled={aiLoadingQuestionId === ans.id} onClick={() => requestAiReview(i)}><Sparkles size={16} />{aiLoadingQuestionId === ans.id ? "Revisando texto..." : "Revisar descrição e evidência com IA"}</button>
+                  <p className="mt-2 text-xs text-slate-500">A IA apenas melhora a redação com base no conteúdo informado. Nenhum texto é substituído sem sua aprovação.</p>
+                  {aiSuggestions[ans.id] && <div className="mt-4 rounded-xl border border-afpesp-200 bg-afpesp-50/50 p-4">
+                    <div className="mb-3 font-semibold text-afpesp-800">Compare antes de aceitar</div>
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div><div className="label">Texto original</div><div className="space-y-3 rounded-lg bg-white p-3 text-sm"><p><b>Descrição:</b> {ans.finding || "—"}</p><p><b>Evidência:</b> {ans.recommendation || "—"}</p></div></div>
+                      <div><div className="label">Sugestão da IA</div><div className="space-y-3 rounded-lg bg-white p-3 text-sm"><p><b>Descrição:</b> {aiSuggestions[ans.id].finding}</p><p><b>Evidência:</b> {aiSuggestions[ans.id].evidence}</p></div></div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2"><button type="button" className="btn-primary" onClick={() => acceptAiReview(i)}>Aceitar sugestão</button><button type="button" className="btn-secondary" onClick={() => setAiSuggestions((current) => { const next = { ...current }; delete next[ans.id]; return next; })}>Descartar</button></div>
+                  </div>}
+                </div>}
                 {!readOnly && <div className="md:col-span-2">
                   <Field label="Fotos / evidências fotográficas">
                     <input
