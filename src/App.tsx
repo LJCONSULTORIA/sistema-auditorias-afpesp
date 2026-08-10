@@ -90,6 +90,15 @@ const valueLabelsPlugin: Plugin = {
     ctx.restore();
   },
 };
+
+const readableError = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const value = error as { message?: string; details?: string; hint?: string };
+    return [value.message, value.details, value.hint].filter(Boolean).join(" — ") || fallback;
+  }
+  return fallback;
+};
 ChartJS.register(
   ArcElement,
   BarElement,
@@ -1319,11 +1328,13 @@ function AuditManagement({
                 className="btn-primary w-full sm:w-auto"
                 onClick={(event) => { event.stopPropagation(); onOpen(a.id!); }}
               >
-                {a.status === "Finalizada"
-                  ? "Abrir auditoria"
-                  : a.status === "Em andamento" || a.status === "Devolvido para ajustes"
-                    ? canManageAudit(a) ? "Continuar auditoria" : "Consultar auditoria"
-                    : canManageAudit(a) ? "Editar programação" : "Consultar auditoria"}
+                {a.status === "Finalizada e aguardando aprovação" && isAdmin
+                  ? "Analisar auditoria"
+                  : a.status === "Finalizada"
+                    ? isAdmin ? "Consultar ou reabrir auditoria" : "Abrir auditoria"
+                    : a.status === "Em andamento" || a.status === "Devolvido para ajustes"
+                      ? "Continuar auditoria"
+                      : "Editar programação"}
               </button> : <span className="rounded-lg bg-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-600">Somente responsáveis podem abrir</span>}
               {canManageAudit(a) && <button
                 type="button"
@@ -1727,7 +1738,7 @@ function AuditForm() {
       setSuccess(needsReapproval ? "Alterações salvas. A auditoria voltou a aguardar aprovação do administrador." : id ? "Alterações salvas com sucesso." : "Auditoria salva com sucesso.");
       nav(`/auditorias/${saved}`);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a auditoria.");
+      setError(readableError(saveError, "Não foi possível salvar a auditoria."));
     }
   };
   const startAudit = async () => {
@@ -1743,9 +1754,16 @@ function AuditForm() {
       status: "Em andamento",
       updatedAt: new Date().toISOString(),
     };
-    await saveRemoteAudit({ ...updated, id });
-    notifyRemoteDataChanged();
-    setAudit(updated);
+    try {
+      await saveRemoteAudit({ ...updated, id });
+      const persisted = await getRemoteAudit(id);
+      if (persisted.status !== "Em andamento") throw new Error("O banco de dados não confirmou o início da auditoria.");
+      notifyRemoteDataChanged();
+      setAudit(persisted);
+      setError("");
+    } catch (startError) {
+      setError(readableError(startError, "Não foi possível iniciar a auditoria."));
+    }
   };
   const finalizeAudit = async () => {
     if (!id || !["Em andamento", "Devolvido para ajustes"].includes(audit.status)) return;
@@ -1808,7 +1826,7 @@ function AuditForm() {
       setReturnReason("");
       setSuccess("Auditoria devolvida para ajustes. Os auditores responsáveis serão avisados no sistema.");
     } catch (returnError) {
-      setError(returnError instanceof Error ? returnError.message : "Não foi possível devolver a auditoria para ajustes.");
+      setError(readableError(returnError, "Não foi possível devolver a auditoria para ajustes."));
     }
   };
   const update = (i: number, p: Partial<Answer>) =>
@@ -2081,7 +2099,17 @@ function AuditForm() {
           {success}
         </p>
       )}
-      {id && profileLoaded && !canManageAudit && audit.status !== "Finalizada" && (
+      {id && profileLoaded && audit.status === "Finalizada e aguardando aprovação" && isAdmin && (
+        <p className="my-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+          Analise o conteúdo da auditoria e escolha <b>Aprovar e finalizar</b> ou <b>Devolver para ajustes</b>. Para preservar a integridade da análise, os campos permanecem somente para consulta até uma devolução ser confirmada.
+        </p>
+      )}
+      {id && profileLoaded && audit.status === "Finalizada" && isAdmin && (
+        <p className="my-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+          Esta auditoria está encerrada. Para alterar seu conteúdo, clique em <b>Reabrir para ajustes</b>, informe o motivo e confirme a reabertura.
+        </p>
+      )}
+      {id && profileLoaded && !canManageAudit && !isAdmin && audit.status !== "Finalizada" && (
         <p className="my-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
           Esta auditoria está disponível somente para consulta. Apenas os auditores responsáveis ou o administrador podem reprogramar, iniciar ou alterar seu conteúdo.
         </p>
