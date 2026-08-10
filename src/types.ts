@@ -105,6 +105,17 @@ export interface Audit {
   returnedBy?: string;
   returnReason?: string;
 }
+export interface AuditSummary {
+  id: string;
+  locationType: LocationType;
+  unit: string;
+  checklistName: string;
+  auditors: string[];
+  startDate: string;
+  endDate: string;
+  status: AuditStatus;
+  updatedAt: string;
+}
 export type PlanStatus = "Planejada" | "Realizada no prazo" | "Realizada em atraso" | "Reprogramada" | "Não realizada";
 export interface AnnualPlanItem {
   id: string;
