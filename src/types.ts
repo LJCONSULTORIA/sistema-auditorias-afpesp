@@ -1,7 +1,7 @@
 export type Classification =
   "Conforme" | "Não Conforme" | "Oportunidade de Melhoria" | "Risco";
 export type LocationType = "Unidade de Lazer" | "Sede Social";
-export type AuditStatus = "Programada" | "Em andamento" | "Finalizada";
+export type AuditStatus = "Programada" | "Em andamento" | "Finalizada e aguardando aprovação" | "Finalizada";
 export interface Unit {
   id?: number;
   remoteId?: string;
@@ -96,4 +96,19 @@ export interface Audit {
   answers: Answer[];
   createdAt: string;
   updatedAt: string;
+  submittedAt?: string;
+  submittedBy?: string;
+  approvedAt?: string;
+  approvedBy?: string;
+}
+export type PlanStatus = "Planejada" | "Realizada no prazo" | "Reprogramada" | "Não realizada";
+export interface AnnualPlanItem {
+  id: string;
+  process: string;
+  month: number;
+  year: number;
+  auditor: string;
+  status: PlanStatus;
+  auditId?: string;
+  notes?: string;
 }

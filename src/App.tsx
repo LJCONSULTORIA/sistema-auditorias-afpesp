@@ -11,6 +11,7 @@ import {
   ArchiveRestore,
   BarChart3,
   Building2,
+  CalendarDays,
   ClipboardCheck,
   Download,
   FileDown,
@@ -42,6 +43,7 @@ import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import type {
   Answer,
+  AnnualPlanItem,
   Audit,
   Auditor,
   Checklist,
@@ -49,6 +51,7 @@ import type {
   Classification,
   DocumentReference,
   LocationType,
+  PlanStatus,
   RegisteredDocument,
   Unit,
 } from "./types";
@@ -208,6 +211,7 @@ function Layout({
   const links = [
     [BarChart3, "/", "Dashboard"],
     [ClipboardCheck, "/auditorias", "Auditorias"],
+    [CalendarDays, "/planejamento", "Planejamento"],
     [Building2, "/cadastros", "Cadastros"],
     ...(role === "admin" ? [[Users, "/usuarios", "Usuários"]] as const : []),
   ] as const;
@@ -215,9 +219,10 @@ function Layout({
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b bg-afpesp-700 text-white">
         <div className={`mx-auto flex h-14 items-center px-3 sm:h-16 sm:px-4 ${mode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
-          <div>
-            <div className="font-bold">AFPESP</div>
-            <div className="hidden text-xs text-afpesp-100 min-[380px]:block">Auditorias Internas</div>
+          <div className="flex items-center gap-2">
+            <img src={`${import.meta.env.BASE_URL}brasao-afpesp.png`} alt="Brasão AFPESP" className="h-11 w-11 object-contain" />
+            <div><div className="font-bold">AFPESP</div>
+            <div className="hidden text-xs text-afpesp-100 min-[380px]:block">Auditorias Internas</div></div>
           </div>
           <div className="ml-auto flex min-w-0 items-center gap-2 text-sm sm:gap-4">
             <span className="max-w-28 truncate font-semibold sm:max-w-none">{user}</span>
@@ -291,15 +296,16 @@ function Login({ onLogin }: { onLogin: (mode: LayoutMode) => void }) {
       return;
     }
     setLoading(true);
-    const redirectTo = `${window.location.origin}${import.meta.env.BASE_URL}`;
+    const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
     setLoading(false);
-    setMessage(error ? error.message : "Enviamos as instruções de redefinição para o e-mail informado.");
+    setMessage(error ? `Não foi possível enviar: ${error.message}` : "Solicitação enviada. Verifique também a caixa de spam. O link funciona para endereços autorizados no sistema.");
   };
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
       <div className="card w-full max-w-md p-5 sm:p-8">
         <div className="mb-6 text-center">
+          <img src={`${import.meta.env.BASE_URL}brasao-afpesp.png`} alt="Brasão AFPESP" className="mx-auto mb-3 h-28 w-28 object-contain" />
           <h1 className="text-2xl font-bold text-afpesp-700 sm:text-3xl">
             Sistema de Auditorias
           </h1>
@@ -978,7 +984,7 @@ function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserN
   const [auditorFilter, setAuditorFilter] = useState("Todos");
   const initialStatus = params.get("status");
   const [status, setStatus] = useState<Audit["status"] | "Todos">(
-    initialStatus === "Programada" || initialStatus === "Em andamento" || initialStatus === "Finalizada"
+    initialStatus === "Programada" || initialStatus === "Em andamento" || initialStatus === "Finalizada e aguardando aprovação" || initialStatus === "Finalizada"
       ? initialStatus
       : "Todos",
   );
@@ -1052,6 +1058,7 @@ function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserN
             <option>Todos</option>
             <option>Programada</option>
             <option>Em andamento</option>
+            <option>Finalizada e aguardando aprovação</option>
             <option>Finalizada</option>
           </select>
         </Field>
@@ -1156,7 +1163,7 @@ function AuditManagement({
               <div className="text-sm font-semibold text-slate-700">
                 {formatDate(a.startDate)}{a.endDate ? ` a ${formatDate(a.endDate)}` : ""}
               </div>
-              <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-afpesp-50 text-afpesp-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
+              <span className={`w-fit shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${a.status === "Finalizada" ? "bg-green-50 text-green-700" : a.status === "Finalizada e aguardando aprovação" ? "bg-purple-50 text-purple-700" : a.status === "Em andamento" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
                 {a.status}
               </span>
             </button>
@@ -1475,7 +1482,7 @@ function AuditForm() {
     (name) => normalizeAuditorName(name) === normalizeAuditorName(auditorAtual),
   );
   const canManageAudit = !id || isAdmin || isAssignedAuditor;
-  const readOnly = audit.status === "Finalizada" || !canManageAudit;
+  const readOnly = !canManageAudit;
   useEffect(() => {
     if (id) getRemoteAudit(id).then(setAudit).catch((error) => setError(error.message));
   }, [id]);
@@ -1584,11 +1591,18 @@ function AuditForm() {
       return setError("Preencha o texto de todas as questões antes de salvar.");
     setError("");
     try {
-      const data = { ...audit, updatedAt: new Date().toISOString() };
+      const needsReapproval = Boolean(id && audit.status === "Finalizada" && isAssignedAuditor && !isAdmin);
+      const data: Audit = {
+        ...audit,
+        status: needsReapproval ? "Finalizada e aguardando aprovação" : audit.status,
+        approvedAt: needsReapproval ? undefined : audit.approvedAt,
+        approvedBy: needsReapproval ? undefined : audit.approvedBy,
+        updatedAt: new Date().toISOString(),
+      };
       const saved = await saveRemoteAudit({ ...data, id: id || data.id });
       setAudit(data);
       notifyRemoteDataChanged();
-      setSuccess(id ? "Reprogramação salva com sucesso." : "Auditoria salva com sucesso.");
+      setSuccess(needsReapproval ? "Alterações salvas. A auditoria voltou a aguardar aprovação do administrador." : id ? "Alterações salvas com sucesso." : "Auditoria salva com sucesso.");
       nav(`/auditorias/${saved}`);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a auditoria.");
@@ -1619,17 +1633,39 @@ function AuditForm() {
       return setError("Preencha o texto de todas as questões antes de finalizar a auditoria.");
     const unanswered = audit.answers.filter((answer) => !answer.classification).length;
     const warning = unanswered
-      ? `Existem ${unanswered} questão(ões) sem classificação. Deseja finalizar mesmo assim?`
-      : "Finalizar esta auditoria? Após a finalização, o conteúdo ficará protegido contra alterações.";
+      ? `Existem ${unanswered} questão(ões) sem classificação. Deseja enviar para aprovação mesmo assim?`
+      : "Enviar esta auditoria para análise e aprovação do administrador?";
     if (!confirm(warning)) return;
     const updated: Audit = {
       ...audit,
-      status: "Finalizada",
+      status: "Finalizada e aguardando aprovação",
+      submittedAt: new Date().toISOString(),
+      submittedBy: auditorAtual,
+      approvedAt: undefined,
+      approvedBy: undefined,
       updatedAt: new Date().toISOString(),
     };
     await saveRemoteAudit({ ...updated, id });
     notifyRemoteDataChanged();
     setAudit(updated);
+  };
+  const approveAudit = async () => {
+    if (!id || !isAdmin || audit.status !== "Finalizada e aguardando aprovação") return;
+    if (!confirm("Aprovar e finalizar definitivamente esta auditoria?")) return;
+    const updated: Audit = { ...audit, status: "Finalizada", approvedAt: new Date().toISOString(), approvedBy: auditorAtual, updatedAt: new Date().toISOString() };
+    await saveRemoteAudit({ ...updated, id });
+    notifyRemoteDataChanged();
+    setAudit(updated);
+    setSuccess("Auditoria aprovada e finalizada.");
+  };
+  const returnForAdjustments = async () => {
+    if (!id || !isAdmin || audit.status !== "Finalizada e aguardando aprovação") return;
+    if (!confirm("Devolver esta auditoria aos responsáveis para ajustes?")) return;
+    const updated: Audit = { ...audit, status: "Em andamento", approvedAt: undefined, approvedBy: undefined, updatedAt: new Date().toISOString() };
+    await saveRemoteAudit({ ...updated, id });
+    notifyRemoteDataChanged();
+    setAudit(updated);
+    setSuccess("Auditoria devolvida para ajustes.");
   };
   const update = (i: number, p: Partial<Answer>) =>
     setAudit((a) => ({
@@ -1758,10 +1794,14 @@ function AuditForm() {
             {id && audit.status === "Em andamento" && profileLoaded && canManageAudit && (
               <button className="btn bg-blue-600 text-white hover:bg-blue-700" onClick={finalizeAudit}>
                 <ClipboardCheck size={16} />
-                Finalizar auditoria
+                Enviar para aprovação
               </button>
             )}
-            {audit.status !== "Finalizada" && canManageAudit && (
+            {id && audit.status === "Finalizada e aguardando aprovação" && isAdmin && <>
+              <button className="btn-secondary" onClick={returnForAdjustments}>Devolver para ajustes</button>
+              <button className="btn bg-green-700 text-white hover:bg-green-800" onClick={approveAudit}>Aprovar e finalizar</button>
+            </>}
+            {canManageAudit && (
             <button className="btn-primary" onClick={save}>
               <Save size={16} />
               Salvar
@@ -1957,7 +1997,7 @@ function AuditForm() {
                         Requisito: {ans.requirement || "Não informado"}
                       </div>
                     </div>
-                    {audit.status === "Em andamento" && canManageAudit && (
+                    {audit.status !== "Programada" && canManageAudit && (
                       <div className="flex shrink-0 gap-2">
                         <button
                           type="button"
@@ -1976,7 +2016,7 @@ function AuditForm() {
                       </div>
                     )}
                   </div>
-                  {editingQuestionId === ans.id && audit.status === "Em andamento" && canManageAudit && (
+                  {editingQuestionId === ans.id && audit.status !== "Programada" && canManageAudit && (
                     <div className="mt-4 grid gap-3 rounded-xl border border-afpesp-100 bg-afpesp-50/50 p-3 sm:grid-cols-2">
                       <Field label="Processo">
                         <input className="field" value={ans.process} onChange={(event) => update(i, { process: event.target.value })} />
@@ -2121,7 +2161,7 @@ function AuditForm() {
                 </div>
               )}
             </div>
-            {audit.status === "Em andamento" && canManageAudit && (
+            {audit.status !== "Programada" && canManageAudit && (
               <div className="flex items-center gap-3" aria-label={`Inserção após a questão ${i + 1}`}>
                 <div className="h-px flex-1 bg-slate-200" />
                 <button
@@ -2136,7 +2176,7 @@ function AuditForm() {
             )}
             </Fragment>
           ))}
-          {audit.status === "Em andamento" && canManageAudit && audit.answers.length === 0 && (
+          {canManageAudit && audit.answers.length === 0 && (
             <button type="button" className="btn-primary w-full sm:w-auto" onClick={() => addQuestion(-1)}>
               <Plus size={16} /> Incluir primeira questão
             </button>
@@ -2551,6 +2591,53 @@ type ManagedUser = {
   created_at: string;
 };
 
+const planStatuses: PlanStatus[] = ["Planejada", "Realizada no prazo", "Reprogramada", "Não realizada"];
+const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
+  const [items, setItems] = useState<AnnualPlanItem[]>([]);
+  const [year, setYear] = useState(2026);
+  const [message, setMessage] = useState("");
+  const [draft, setDraft] = useState({ process: "", month: new Date().getMonth() + 1, auditor: "" });
+  const load = async () => {
+    const { data, error } = await supabase.from("audit_annual_plan_items").select("id,process,planned_month,planned_year,auditor,status,audit_record_id,notes").eq("planned_year", year).order("planned_month").order("process");
+    if (error) return setMessage(error.message);
+    setItems((data ?? []).map((row) => ({ id: row.id, process: row.process, month: row.planned_month, year: row.planned_year, auditor: row.auditor, status: row.status as PlanStatus, auditId: row.audit_record_id ?? undefined, notes: row.notes })));
+  };
+  useEffect(() => { load(); }, [year]);
+  const updateItem = async (item: AnnualPlanItem, changes: Partial<AnnualPlanItem>) => {
+    const next = { ...item, ...changes };
+    const { error } = await supabase.from("audit_annual_plan_items").update({ process: next.process, planned_month: next.month, auditor: next.auditor, status: next.status, notes: next.notes ?? "" }).eq("id", item.id);
+    if (error) return setMessage(error.message);
+    setItems((current) => current.map((row) => row.id === item.id ? next : row));
+    setMessage("Planejamento atualizado.");
+  };
+  const add = async () => {
+    if (!draft.process.trim()) return setMessage("Informe o processo ou local da auditoria planejada.");
+    const { data: auth } = await supabase.auth.getUser();
+    const { error } = await supabase.from("audit_annual_plan_items").insert({ process: draft.process.trim(), planned_month: draft.month, planned_year: year, auditor: draft.auditor.trim(), status: "Planejada", created_by: auth.user?.id });
+    if (error) return setMessage(error.message);
+    setDraft({ process: "", month: draft.month, auditor: "" }); setMessage("Item incluído no plano anual."); load();
+  };
+  const remove = async (item: AnnualPlanItem) => {
+    if (!confirm(`Excluir ${item.process} do planejamento?`)) return;
+    const { error } = await supabase.from("audit_annual_plan_items").delete().eq("id", item.id);
+    if (error) return setMessage(error.message);
+    setItems((current) => current.filter((row) => row.id !== item.id));
+  };
+  const realized = items.filter((item) => item.status === "Realizada no prazo").length;
+  const efficacy = items.length ? Math.round(realized / items.length * 1000) / 10 : 0;
+  const monthlyPlanned = monthNames.map((_, index) => items.filter((item) => item.month === index + 1).length);
+  const monthlyRealized = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada no prazo").length);
+  return <>
+    <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." action={<select className="field w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}><option>2026</option><option>2027</option><option>2028</option></select>} />
+    <div className="mb-6 grid gap-4 sm:grid-cols-3"><Stat title="Planejadas" value={String(items.length)} icon={<CalendarDays size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
+    <div className="card mb-6"><h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2><p className="mb-4 text-sm text-slate-500">Todos os processos do plano anual, sem excluir unidades dos totais.</p><div className="h-72"><Bar data={{ labels: monthNames, datasets: [{ label: "Planejadas", data: monthlyPlanned, backgroundColor: "#93c5fd" }, { label: "Realizadas no prazo", data: monthlyRealized, backgroundColor: "#15803d" }] }} options={{ responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }} /></div></div>
+    {isAdmin && <div className="card mb-6"><h2 className="mb-4 text-lg font-bold text-afpesp-700">Incluir item no planejamento</h2><div className="grid gap-3 md:grid-cols-[2fr_.7fr_1.2fr_auto]"><Field label="Processo / local"><input className="field" value={draft.process} onChange={(e) => setDraft({ ...draft, process: e.target.value })} /></Field><Field label="Mês"><select className="field" value={draft.month} onChange={(e) => setDraft({ ...draft, month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></Field><Field label="Auditor(es)"><input className="field" value={draft.auditor} onChange={(e) => setDraft({ ...draft, auditor: e.target.value })} /></Field><button className="btn-primary self-end" onClick={add}><Plus size={16} /> Incluir</button></div></div>}
+    {message && <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
+    <div className="card overflow-hidden p-0"><div className="grid grid-cols-[1fr_70px] gap-3 border-b bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px]"><span>Processo / local</span><span>Mês</span><span className="hidden sm:block">Auditor(es)</span><span className="hidden sm:block">Status</span><span /></div><div className="divide-y">{items.map((item) => <div key={item.id} className="grid grid-cols-[1fr_70px] gap-3 p-3 sm:grid-cols-[1.5fr_80px_1fr_1fr_48px] sm:items-center"><input className="field" readOnly={!isAdmin} value={item.process} onBlur={(e) => isAdmin && e.target.value !== item.process && updateItem(item, { process: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, process: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.month} onChange={(e) => updateItem(item, { month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select><input className="field sm:block" readOnly={!isAdmin} value={item.auditor} onBlur={(e) => isAdmin && updateItem(item, { auditor: e.target.value })} onChange={(e) => setItems((current) => current.map((row) => row.id === item.id ? { ...row, auditor: e.target.value } : row))} /><select className="field" disabled={!isAdmin} value={item.status} onChange={(e) => updateItem(item, { status: e.target.value as PlanStatus })}>{planStatuses.map((status) => <option key={status}>{status}</option>)}</select>{isAdmin && <button className="rounded-lg p-2 text-red-600 hover:bg-red-50" onClick={() => remove(item)} aria-label={`Excluir ${item.process}`}><Trash2 size={17} /></button>}</div>)}</div></div>
+  </>;
+}
+
 function UsersAdmin() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [fullName, setFullName] = useState("");
@@ -2610,7 +2697,7 @@ function UsersAdmin() {
       const tables = [
         "audit_allowed_users", "audit_profiles", "audit_units", "audit_documents",
         "audit_checklists", "audit_document_imports", "audit_records", "audits",
-        "audit_answers", "audit_photos",
+        "audit_answers", "audit_photos", "audit_annual_plan_items",
       ] as const;
       const results = await Promise.all(tables.map(async (table) => {
         const { data, error } = await supabase.from(table).select("*");
@@ -2708,10 +2795,20 @@ function UsersAdmin() {
         <div className="border-b p-4 sm:p-5"><h2 className="text-lg font-bold text-afpesp-700">Usuários autorizados ({users.length})</h2></div>
         <div className="divide-y">
           {users.map((user) => (
-            <div key={user.id} className="grid gap-3 p-4 lg:grid-cols-[1.5fr_1.2fr_.6fr_.6fr_auto] lg:items-center">
+            <div key={user.id} className="grid gap-3 p-4 lg:grid-cols-[1.5fr_1fr_.9fr_.5fr_auto] lg:items-center">
               <div><div className="font-bold text-slate-800">{user.full_name}</div><div className="text-sm text-slate-500">{user.email}</div></div>
               <div className="text-sm"><span className="font-semibold">Conta:</span> {user.auth_user_id ? "Criada" : "Pendente"}</div>
-              <div className="text-sm font-semibold">{user.role === "admin" ? "Administrador" : "Auditor"}</div>
+              <select
+                className="field py-2 text-sm font-semibold"
+                value={user.role}
+                disabled={loading || !user.auth_user_id}
+                aria-label={`Perfil de ${user.full_name}`}
+                onChange={(event) => {
+                  if (!user.auth_user_id) return;
+                  const nextRole = event.target.value as UserRole;
+                  action({ action: "update", userId: user.auth_user_id, fullName: user.full_name, role: nextRole }, `Perfil de ${user.full_name} alterado para ${nextRole === "admin" ? "Administrador" : "Auditor"}.`);
+                }}
+              ><option value="auditor">Auditor</option><option value="admin">Administrador</option></select>
               <div className={`text-sm font-bold ${user.active ? "text-green-600" : "text-red-600"}`}>{user.active ? "Ativo" : "Inativo"}</div>
               <div className="flex flex-wrap gap-2">
                 {user.auth_user_id && <>
@@ -2799,6 +2896,7 @@ export default function App() {
         <Route path="/auditorias" element={<AuditHub isAdmin={profile.role === "admin"} currentUserName={profile.full_name} />} />
         <Route path="/auditorias/nova" element={<AuditForm />} />
         <Route path="/auditorias/:id" element={<AuditForm />} />
+        <Route path="/planejamento" element={<AnnualPlanning isAdmin={profile.role === "admin"} />} />
         <Route path="/cadastros" element={<Cadastros />} />
         {profile.role === "admin" && <Route path="/usuarios" element={<UsersAdmin />} />}
       </Routes>

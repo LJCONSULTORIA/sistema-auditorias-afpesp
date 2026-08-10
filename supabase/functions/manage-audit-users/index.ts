@@ -84,6 +84,13 @@ Deno.serve(async (request: Request) => {
 
     if (payload.action === "update") {
       const fullName = payload.fullName.trim();
+      if (payload.userId === authData.user.id && payload.role !== "admin")
+        return response({ error: "O administrador não pode remover o próprio perfil administrativo." }, 400);
+      const { data: targetProfile } = await admin.from("audit_profiles").select("role, active").eq("id", payload.userId).single();
+      if (targetProfile?.role === "admin" && targetProfile.active && payload.role !== "admin") {
+        const { count } = await admin.from("audit_profiles").select("id", { count: "exact", head: true }).eq("role", "admin").eq("active", true);
+        if ((count ?? 0) <= 1) return response({ error: "Mantenha ao menos um administrador ativo no sistema." }, 400);
+      }
       const { error: authUpdateError } = await admin.auth.admin.updateUserById(payload.userId, {
         user_metadata: { full_name: fullName },
       });

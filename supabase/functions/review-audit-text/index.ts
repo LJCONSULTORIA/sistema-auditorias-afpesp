@@ -49,8 +49,8 @@ Deno.serve(async (request: Request) => {
       admin.from("audit_records").select("status, data").eq("id", payload.auditId).single(),
     ]);
     if (!profile?.active) return json({ error: "Usuário sem acesso ativo." }, 403);
-    if (!record || record.status !== "Em andamento")
-      return json({ error: "A revisão com IA é permitida apenas em auditorias em andamento." }, 400);
+    if (!record || record.status === "Programada")
+      return json({ error: "Inicie a auditoria antes de solicitar a revisão com IA." }, 400);
 
     const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLocaleLowerCase("pt-BR");
     const auditors = Array.isArray(record.data?.auditors) ? record.data.auditors.filter((value: unknown) => typeof value === "string") : [];
