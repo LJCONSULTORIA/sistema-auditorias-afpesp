@@ -15,6 +15,7 @@ import {
   ClipboardCheck,
   Download,
   FileDown,
+  KeyRound,
   LogOut,
   Monitor,
   Plus,
@@ -295,21 +296,20 @@ function Login({ onLogin }: { onLogin: (mode: LayoutMode) => void }) {
   };
   const recover = async () => {
     if (!email.trim()) {
-      setMessage("Informe seu e-mail para receber a redefinição de senha.");
+      setMessage("Informe seu e-mail para solicitar a redefinição de senha ao administrador.");
       return;
     }
     setLoading(true);
-    const redirectTo = "https://lljafpesp.github.io/sistema-auditorias-afpesp/";
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
+    setMessage("");
+    const { data, error } = await supabase.functions.invoke("request-password-reset", {
+      body: { email: email.trim().toLowerCase() },
+    });
     setLoading(false);
     if (error) {
-      const rateLimitReached = error.message.toLowerCase().includes("rate limit");
-      setMessage(rateLimitReached
-        ? "O limite temporário de envio de e-mails foi atingido. Aguarde e tente novamente mais tarde. O administrador também pode definir uma senha temporária na tela de usuários."
-        : `Não foi possível enviar o e-mail de recuperação: ${error.message}`);
+      setMessage("Não foi possível encaminhar a solicitação agora. Tente novamente mais tarde.");
       return;
     }
-    setMessage("Solicitação enviada. Verifique também a caixa de spam. O link funciona para endereços autorizados no sistema.");
+    setMessage(data?.message ?? "Se o e-mail estiver cadastrado e ativo, a solicitação será encaminhada ao administrador.");
   };
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
@@ -372,7 +372,7 @@ function Login({ onLogin }: { onLogin: (mode: LayoutMode) => void }) {
           {loading ? "Aguarde..." : "Acessar sistema"}
         </button>
         <button type="button" className="mt-4 w-full text-center text-sm font-semibold text-afpesp-700" onClick={recover} disabled={loading}>
-          Esqueci minha senha
+          Solicitar redefinição de senha
         </button>
       </div>
     </div>
@@ -2630,6 +2630,13 @@ type ManagedUser = {
   auth_user_id: string | null;
   created_at: string;
 };
+type PasswordResetRequest = {
+  id: string;
+  user_id: string;
+  status: "Pendente" | "Concluída" | "Cancelada";
+  requested_at: string;
+  audit_profiles: { full_name: string } | null;
+};
 
 const planStatuses: PlanStatus[] = ["Planejada", "Realizada no prazo", "Reprogramada", "Não realizada"];
 const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -2702,6 +2709,8 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
 
 function UsersAdmin() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetRequest[]>([]);
+  const [temporaryPassword, setTemporaryPassword] = useState<{ name: string; password: string } | null>(null);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>("auditor");
@@ -2719,6 +2728,7 @@ function UsersAdmin() {
     try {
       const data = await invoke({ action: "list" });
       setUsers(data.users ?? []);
+      setPasswordResetRequests(data.passwordResetRequests ?? []);
       setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Não foi possível consultar os usuários.");
@@ -2731,19 +2741,21 @@ function UsersAdmin() {
     if (!fullName.trim() || !email.trim()) return;
     setLoading(true);
     try {
-      await invoke({ action: "create", fullName: fullName.trim(), email: email.trim().toLowerCase(), role });
+      const data = await invoke({ action: "create", fullName: fullName.trim(), email: email.trim().toLowerCase(), role });
+      if (data.temporaryPassword) setTemporaryPassword({ name: fullName.trim(), password: data.temporaryPassword });
       setFullName(""); setEmail(""); setRole("auditor");
-      setMessage("Usuário criado com a senha temporária AFPESP@1234.");
+      setMessage("Usuário criado. Copie e comunique a senha temporária exibida abaixo.");
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Não foi possível criar o usuário.");
       setLoading(false);
     }
   };
-  const action = async (body: Record<string, unknown>, success: string) => {
+  const action = async (body: Record<string, unknown>, success: string, targetName?: string) => {
     setLoading(true);
     try {
-      await invoke(body);
+      const data = await invoke(body);
+      if (data.temporaryPassword) setTemporaryPassword({ name: targetName ?? "Usuário", password: data.temporaryPassword });
       setMessage(success);
       await refresh();
     } catch (error) {
@@ -2829,6 +2841,37 @@ function UsersAdmin() {
   return (
     <>
       <PageTitle title="Gerenciar usuários" subtitle="Área exclusiva do administrador do Sistema de Auditorias AFPESP." />
+      {passwordResetRequests.length > 0 && (
+        <div className="card mb-6 border-amber-200 bg-amber-50 p-4 sm:p-5">
+          <div className="mb-4 flex items-center gap-2 text-amber-900"><KeyRound size={20} /><h2 className="text-lg font-bold">Solicitações de redefinição ({passwordResetRequests.length})</h2></div>
+          <div className="space-y-3">
+            {passwordResetRequests.map((request) => {
+              const user = users.find((item) => item.auth_user_id === request.user_id);
+              const name = request.audit_profiles?.full_name ?? user?.full_name ?? "Usuário";
+              return (
+                <div key={request.id} className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div><div className="font-bold text-slate-800">{name}</div><div className="text-sm text-slate-500">Solicitado em {new Date(request.requested_at).toLocaleString("pt-BR")}</div></div>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="btn-primary px-3 text-xs" disabled={loading} onClick={() => action({ action: "reset_temporary_password", userId: request.user_id, requestId: request.id }, `Senha temporária gerada para ${name}.`, name)}>Gerar senha temporária</button>
+                    <button className="btn-secondary px-3 text-xs" disabled={loading} onClick={() => action({ action: "cancel_password_reset", requestId: request.id }, `Solicitação de ${name} cancelada.`)}>Cancelar solicitação</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {temporaryPassword && (
+        <div className="card mb-6 border-green-300 bg-green-50 p-4 sm:p-5" role="alert">
+          <h2 className="font-bold text-green-900">Senha temporária de {temporaryPassword.name}</h2>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <code className="rounded-lg border border-green-200 bg-white px-4 py-3 text-lg font-bold text-slate-900">{temporaryPassword.password}</code>
+            <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(temporaryPassword.password)}>Copiar senha</button>
+            <button className="text-sm font-bold text-slate-600" onClick={() => setTemporaryPassword(null)}>Fechar</button>
+          </div>
+          <p className="mt-3 text-xs text-green-800">Esta senha é exibida somente agora. Comunique-a ao usuário por canal interno; ele deverá alterá-la no primeiro acesso.</p>
+        </div>
+      )}
       <div className="card mb-6 p-4 sm:p-5">
         <h2 className="mb-4 text-lg font-bold text-afpesp-700">Cadastrar novo usuário</h2>
         <div className="grid gap-3 md:grid-cols-[1.5fr_1.2fr_.7fr_auto]">
@@ -2837,7 +2880,7 @@ function UsersAdmin() {
           <Field label="Perfil"><select className="field" value={role} onChange={(e) => setRole(e.target.value as UserRole)}><option value="auditor">Auditor</option><option value="admin">Administrador</option></select></Field>
           <button className="btn-primary self-end" disabled={loading || !fullName.trim() || !email.trim()} onClick={create}><Plus size={16} /> Criar usuário</button>
         </div>
-        <p className="mt-3 text-xs text-slate-500">O novo usuário recebe a senha temporária AFPESP@1234 e deverá substituí-la no primeiro acesso.</p>
+        <p className="mt-3 text-xs text-slate-500">O sistema gera uma senha temporária individual, exibida uma única vez, que deverá ser substituída no primeiro acesso.</p>
       </div>
       <div className="card mb-6 p-4 sm:p-5">
         <h2 className="text-lg font-bold text-afpesp-700">Backup manual</h2>
@@ -2874,7 +2917,7 @@ function UsersAdmin() {
               <div className={`text-sm font-bold ${user.active ? "text-green-600" : "text-red-600"}`}>{user.active ? "Ativo" : "Inativo"}</div>
               <div className="flex flex-wrap gap-2">
                 {user.auth_user_id && <>
-                  <button className="btn-secondary px-3 text-xs" disabled={loading} onClick={() => action({ action: "reset_temporary_password", userId: user.auth_user_id }, `Senha temporária redefinida para ${user.full_name}.`)}>Redefinir senha</button>
+                  <button className="btn-secondary px-3 text-xs" disabled={loading} onClick={() => action({ action: "reset_temporary_password", userId: user.auth_user_id }, `Senha temporária redefinida para ${user.full_name}.`, user.full_name)}>Redefinir senha</button>
                   <button className="btn-secondary px-3 text-xs" disabled={loading} onClick={() => action({ action: "set_active", userId: user.auth_user_id, active: !user.active }, user.active ? "Usuário desativado." : "Usuário reativado.")}>{user.active ? "Desativar" : "Reativar"}</button>
                   <button className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" disabled={loading} onClick={() => confirm(`Excluir o usuário ${user.full_name}?`) && action({ action: "delete", userId: user.auth_user_id }, "Usuário excluído.")}><Trash2 size={14} className="inline" /> Excluir</button>
                 </>}
