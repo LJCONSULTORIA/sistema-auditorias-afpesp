@@ -274,7 +274,9 @@ export async function buildAuditReport(a: Audit) {
         : []),
       questionLabel("Classificação", ans.classification || "Não classificada"),
       questionLabel("Descrição", clean(ans.finding)),
-      questionLabel("Evidência", clean(ans.recommendation)),
+      ...(ans.evidences?.length ? ans.evidences : [ans.recommendation ?? ""]).map((evidence, evidenceIndex) =>
+        questionLabel(`Evidência ${evidenceIndex + 1}`, clean(evidence)),
+      ),
     );
     for (let j = 0; j < ans.photos.length; j += 1) {
       const p = ans.photos[j];
@@ -341,7 +343,7 @@ export function exportExcel(audits: Audit[]) {
       "Título do documento": documentsOf(x).map((document) => document.title).join("\n"),
       Versão: documentsOf(x).map((document) => document.version).join("\n"),
       Descrição: x.finding,
-      Evidência: x.recommendation,
+      Evidências: (x.evidences?.length ? x.evidences : [x.recommendation ?? ""]).join("\n"),
     })),
   );
   const wb = XLSX.utils.book_new();
