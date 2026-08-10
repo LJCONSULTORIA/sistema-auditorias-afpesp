@@ -212,6 +212,7 @@ function Layout({
   mode: LayoutMode;
   onLogout: () => void;
 }) {
+  const [pendingPasswordResets, setPendingPasswordResets] = useState(0);
   const links = [
     [BarChart3, "/", "Dashboard"],
     [ClipboardCheck, "/auditorias", "Auditorias"],
@@ -219,6 +220,19 @@ function Layout({
     [Building2, "/cadastros", "Cadastros"],
     ...(role === "admin" ? [[Users, "/usuarios", "Usuários"]] as const : []),
   ] as const;
+  useEffect(() => {
+    if (role !== "admin") return;
+    let active = true;
+    const refreshPendingRequests = async () => {
+      const { data, error } = await supabase.functions.invoke("manage-audit-users", {
+        body: { action: "list" },
+      });
+      if (active && !error) setPendingPasswordResets(data?.passwordResetRequests?.length ?? 0);
+    };
+    refreshPendingRequests();
+    const interval = window.setInterval(refreshPendingRequests, 60_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [role]);
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b bg-afpesp-700 text-white">
@@ -239,6 +253,19 @@ function Layout({
           </div>
         </div>
       </header>
+      {role === "admin" && pendingPasswordResets > 0 && (
+        <div className="border-b border-amber-300 bg-amber-50">
+          <div className={`mx-auto flex flex-col gap-2 px-3 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between sm:px-4 ${mode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
+            <div className="flex items-center gap-2 font-bold">
+              <KeyRound size={18} />
+              {pendingPasswordResets === 1
+                ? "Há 1 solicitação de redefinição de senha pendente."
+                : `Há ${pendingPasswordResets} solicitações de redefinição de senha pendentes.`}
+            </div>
+            <NavLink to="/usuarios" className="font-bold text-afpesp-700 underline underline-offset-2">Analisar solicitação</NavLink>
+          </div>
+        </div>
+      )}
       <div className={`mx-auto flex ${mode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
         <aside className={`${mode === "mobile" ? "hidden" : "hidden md:block"} min-h-[calc(100vh-4rem)] w-64 shrink-0 border-r bg-white p-4`}>
           {links.map(([Icon, to, label]) => (
