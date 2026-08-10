@@ -714,44 +714,44 @@ function HomePage() {
           value={String(filteredPlan.length)}
           icon={<ClipboardCheck />}
           detail="Itens do plano anual"
-          onClick={() => nav("/planejamento")}
+          onClick={() => nav("/planejamento?status=Todos")}
         />
         <Stat
           title="Realizadas no prazo"
           value={String(planRealized)}
           icon={<ArchiveRestore />}
-          onClick={() => nav("/planejamento")}
+          onClick={() => nav("/planejamento?status=Realizada%20no%20prazo")}
         />
         <Stat
           title="Planejadas pendentes"
           value={String(filteredPlan.filter((item) => item.status === "Planejada").length)}
           icon={<ClipboardCheck />}
-          onClick={() => nav("/planejamento")}
+          onClick={() => nav("/planejamento?status=Planejada")}
         />
         <Stat
           title="Realizadas em atraso"
           value={String(planRealizedLate)}
           icon={<CalendarDays />}
-          onClick={() => nav("/planejamento")}
+          onClick={() => nav("/planejamento?status=Realizada%20em%20atraso")}
         />
         <Stat
           title="Reprogramadas"
           value={String(planReprogrammed)}
           icon={<Settings />}
-          onClick={() => nav("/planejamento")}
+          onClick={() => nav("/planejamento?status=Reprogramada")}
         />
         <Stat
           title="Não realizadas"
           value={String(planNotPerformed)}
           icon={<CalendarDays />}
-          onClick={() => nav("/planejamento")}
+          onClick={() => nav("/planejamento?status=N%C3%A3o%20realizada")}
         />
         <Stat
           title="Eficácia do plano"
           value={`${planEfficacy}%`}
           icon={<BarChart3 />}
           detail="Realizadas no prazo ÷ planejadas"
-          onClick={() => nav("/planejamento")}
+          onClick={() => nav("/planejamento?status=Todos")}
         />
       </div>
       <h2 className="mb-1 mt-6 text-lg font-bold text-slate-800">Resultados das auditorias cadastradas</h2>
@@ -2783,9 +2783,15 @@ function AuditorPlanSelect({ value, options, onChange }: { value: string; option
   </div>;
 }
 function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
+  const [params] = useSearchParams();
+  const requestedStatus = params.get("status");
+  const initialStatus: PlanStatus | "Todos" = requestedStatus && planStatuses.includes(requestedStatus as PlanStatus)
+    ? requestedStatus as PlanStatus
+    : "Todos";
   const [items, setItems] = useState<AnnualPlanItem[]>([]);
   const [year, setYear] = useState(2026);
   const [monthFilter, setMonthFilter] = useState<number | "Todos">("Todos");
+  const [statusFilter, setStatusFilter] = useState<PlanStatus | "Todos">(initialStatus);
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState({ process: "", month: new Date().getMonth() + 1, auditor: "" });
   const planningUnits = useRemoteUnits().filter((unit) => unit.active).sort((a, b) => `${a.type} ${a.name}`.localeCompare(`${b.type} ${b.name}`, "pt-BR"));
@@ -2826,22 +2832,31 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
     setItems((current) => current.filter((row) => row.id !== item.id));
     notifyRemoteDataChanged();
   };
-  const filteredItems = monthFilter === "Todos" ? items : items.filter((item) => item.month === monthFilter);
-  const realized = filteredItems.filter((item) => item.status === "Realizada no prazo").length;
-  const realizedLate = filteredItems.filter((item) => item.status === "Realizada em atraso").length;
-  const pending = filteredItems.filter((item) => item.status === "Planejada").length;
-  const reprogrammed = filteredItems.filter((item) => item.status === "Reprogramada").length;
-  const notPerformed = filteredItems.filter((item) => item.status === "Não realizada").length;
-  const efficacy = filteredItems.length ? Math.round(realized / filteredItems.length * 1000) / 10 : 0;
-  const monthlyPlanned = monthNames.map((_, index) => items.filter((item) => item.month === index + 1).length);
+  const monthItems = monthFilter === "Todos" ? items : items.filter((item) => item.month === monthFilter);
+  const filteredItems = statusFilter === "Todos" ? monthItems : monthItems.filter((item) => item.status === statusFilter);
+  const realized = monthItems.filter((item) => item.status === "Realizada no prazo").length;
+  const realizedLate = monthItems.filter((item) => item.status === "Realizada em atraso").length;
+  const pending = monthItems.filter((item) => item.status === "Planejada").length;
+  const reprogrammed = monthItems.filter((item) => item.status === "Reprogramada").length;
+  const notPerformed = monthItems.filter((item) => item.status === "Não realizada").length;
+  const efficacy = monthItems.length ? Math.round(realized / monthItems.length * 1000) / 10 : 0;
+  const monthlyPending = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Planejada").length);
   const monthlyRealized = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada no prazo").length);
   const monthlyRealizedLate = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Realizada em atraso").length);
   const monthlyReprogrammed = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Reprogramada").length);
   const monthlyNotPerformed = monthNames.map((_, index) => items.filter((item) => item.month === index + 1 && item.status === "Não realizada").length);
   const visibleMonthIndexes = monthFilter === "Todos" ? monthNames.map((_, index) => index) : [monthFilter - 1];
+  const chartDatasets = [
+    { status: "Planejada" as PlanStatus, label: "Planejadas pendentes", data: visibleMonthIndexes.map((index) => monthlyPending[index]), backgroundColor: "#93c5fd" },
+    { status: "Realizada no prazo" as PlanStatus, label: "Realizadas no prazo", data: visibleMonthIndexes.map((index) => monthlyRealized[index]), backgroundColor: "#15803d" },
+    { status: "Realizada em atraso" as PlanStatus, label: "Realizadas em atraso", data: visibleMonthIndexes.map((index) => monthlyRealizedLate[index]), backgroundColor: "#dc2626" },
+    { status: "Reprogramada" as PlanStatus, label: "Reprogramadas", data: visibleMonthIndexes.map((index) => monthlyReprogrammed[index]), backgroundColor: "#d97706" },
+    { status: "Não realizada" as PlanStatus, label: "Não realizadas", data: visibleMonthIndexes.map((index) => monthlyNotPerformed[index]), backgroundColor: "#64748b" },
+  ].filter((dataset) => statusFilter === "Todos" || dataset.status === statusFilter)
+    .map((dataset) => ({ ...dataset, borderRadius: 5, borderSkipped: false as const, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 }));
   return <>
     <PageTitle title="Planejamento anual de auditorias" subtitle="Plano distinto da programação operacional de cada auditoria." />
-    <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7"><Stat title="Total planejado" value={String(filteredItems.length)} icon={<CalendarDays size={22} />} /><Stat title="Planejadas pendentes" value={String(pending)} icon={<ClipboardCheck size={22} />} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} /><Stat title="Realizadas em atraso" value={String(realizedLate)} icon={<CalendarDays size={22} />} /><Stat title="Reprogramadas" value={String(reprogrammed)} icon={<Settings size={22} />} /><Stat title="Não realizadas" value={String(notPerformed)} icon={<CalendarDays size={22} />} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} /></div>
+    <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7"><Stat title="Total planejado" value={String(monthItems.length)} icon={<CalendarDays size={22} />} onClick={() => setStatusFilter("Todos")} active={statusFilter === "Todos"} /><Stat title="Planejadas pendentes" value={String(pending)} icon={<ClipboardCheck size={22} />} onClick={() => setStatusFilter("Planejada")} active={statusFilter === "Planejada"} /><Stat title="Realizadas no prazo" value={String(realized)} icon={<ClipboardCheck size={22} />} onClick={() => setStatusFilter("Realizada no prazo")} active={statusFilter === "Realizada no prazo"} /><Stat title="Realizadas em atraso" value={String(realizedLate)} icon={<CalendarDays size={22} />} onClick={() => setStatusFilter("Realizada em atraso")} active={statusFilter === "Realizada em atraso"} /><Stat title="Reprogramadas" value={String(reprogrammed)} icon={<Settings size={22} />} onClick={() => setStatusFilter("Reprogramada")} active={statusFilter === "Reprogramada"} /><Stat title="Não realizadas" value={String(notPerformed)} icon={<CalendarDays size={22} />} onClick={() => setStatusFilter("Não realizada")} active={statusFilter === "Não realizada"} /><Stat title="Eficácia do plano" value={`${efficacy}%`} icon={<BarChart3 size={22} />} onClick={() => setStatusFilter("Todos")} /></div>
     <div className="card mb-6">
       <h2 className="mb-1 text-lg font-bold text-afpesp-700">Planejado x realizado por mês</h2>
       <p className="mb-4 text-sm text-slate-500">Passe o mouse ou toque em uma barra para consultar os locais/processos daquele mês.</p>
@@ -2849,20 +2864,15 @@ function AnnualPlanning({ isAdmin }: { isAdmin: boolean }) {
         <Bar
           data={{
             labels: visibleMonthIndexes.map((index) => monthNames[index]),
-            datasets: [
-              { label: "Planejadas", data: visibleMonthIndexes.map((index) => monthlyPlanned[index]), backgroundColor: "#93c5fd", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
-              { label: "Realizadas no prazo", data: visibleMonthIndexes.map((index) => monthlyRealized[index]), backgroundColor: "#15803d", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
-              { label: "Realizadas em atraso", data: visibleMonthIndexes.map((index) => monthlyRealizedLate[index]), backgroundColor: "#dc2626", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
-              { label: "Reprogramadas", data: visibleMonthIndexes.map((index) => monthlyReprogrammed[index]), backgroundColor: "#d97706", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
-              { label: "Não realizadas", data: visibleMonthIndexes.map((index) => monthlyNotPerformed[index]), backgroundColor: "#64748b", borderRadius: 5, borderSkipped: false, maxBarThickness: 24, categoryPercentage: 0.48, barPercentage: 0.68 },
-            ],
+            datasets: chartDatasets,
           }}
-          options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const statuses: Array<PlanStatus | null> = [null, "Realizada no prazo", "Realizada em atraso", "Reprogramada", "Não realizada"]; const status = statuses[context.datasetIndex] ?? null; const rows = items.filter((item) => item.month === monthIndex + 1 && (!status || item.status === status)); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
+          options={{ responsive: true, maintainAspectRatio: false, plugins: { tooltip: { callbacks: { afterBody: (contexts) => { const context = contexts[0]; if (!context) return []; const monthIndex = visibleMonthIndexes[context.dataIndex]; const status = chartDatasets[context.datasetIndex]?.status; const rows = items.filter((item) => item.month === monthIndex + 1 && item.status === status); return rows.length ? ["", "Locais/processos:", ...rows.map((item) => `• ${item.process}`)] : ["", "Nenhum local/processo."]; } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }}
         />
       </div>
       <div className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
         <select aria-label="Filtrar por ano" className="field sm:w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}><option>2026</option><option>2027</option><option>2028</option></select>
         <select aria-label="Filtrar por mês" className="field sm:w-40" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value === "Todos" ? "Todos" : Number(e.target.value))}><option value="Todos">Todos os meses</option>{monthNames.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select>
+        <select aria-label="Filtrar por status" className="field sm:w-56" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as PlanStatus | "Todos")}><option value="Todos">Todos os status</option>{planStatuses.map((status) => <option key={status} value={status}>{status === "Planejada" ? "Planejada pendente" : status}</option>)}</select>
       </div>
     </div>
     {isAdmin && <div className="card mb-6"><h2 className="mb-4 text-lg font-bold text-afpesp-700">Incluir item no planejamento</h2><div className="grid gap-3 md:grid-cols-[2fr_.7fr_1.2fr_auto]"><Field label="Processo / local"><select className="field" value={draft.process} onChange={(e) => setDraft({ ...draft, process: e.target.value })}><option value="">Selecione o local ou processo</option>{planningUnits.map((unit) => <option key={unit.remoteId ?? unit.id} value={unit.name}>{unit.type} — {unit.name}</option>)}</select></Field><Field label="Mês"><select className="field" value={draft.month} onChange={(e) => setDraft({ ...draft, month: Number(e.target.value) })}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></Field><Field label="Auditor(es)"><AuditorPlanSelect value={draft.auditor} options={planningAuditors} onChange={(auditor) => setDraft({ ...draft, auditor })} /></Field><button className="btn-primary self-end" onClick={add}><Plus size={16} /> Incluir</button></div></div>}
