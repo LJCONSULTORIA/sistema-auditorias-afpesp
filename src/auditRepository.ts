@@ -18,7 +18,7 @@ const hydrateAudit = async (row: { id: string; data: Record<string, unknown> }) 
     const paths = (answer.photos ?? []).map((photo) => photo.replace(/^storage:/, ""));
     const photos = await Promise.all(paths.map(signedPhoto));
     const evidences = answer.evidences?.length ? answer.evidences : [answer.recommendation ?? ""];
-    return { ...answer, evidences, recommendation: evidences[0] ?? "", photos, photoPaths: paths };
+    return { ...answer, auditTip: answer.auditTip ?? "", evidences, recommendation: evidences[0] ?? "", photos, photoPaths: paths };
   }));
   return audit;
 };
