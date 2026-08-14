@@ -8,6 +8,7 @@ const corsHeaders = {
 
 type UserAction =
   | { action: "list" }
+  | { action: "backup" }
   | { action: "create"; email: string; fullName: string; role?: "admin" | "auditor" }
   | { action: "update"; userId: string; fullName: string; role: "admin" | "auditor" }
   | { action: "set_active"; userId: string; active: boolean }
@@ -70,6 +71,28 @@ Deno.serve(async (request: Request) => {
         .order("requested_at", { ascending: false });
       if (requestError) throw requestError;
       return response({ users, passwordResetRequests: requests });
+    }
+
+    if (payload.action === "backup") {
+      const tables = [
+        "audit_allowed_users", "audit_profiles", "audit_units", "audit_documents",
+        "audit_checklists", "audit_document_imports", "audit_records",
+        "audit_record_summaries", "audit_notifications", "audit_password_reset_requests",
+        "audit_annual_plan_items", "audits", "audit_answers", "audit_photos",
+      ] as const;
+      const results = await Promise.all(tables.map(async (table) => {
+        const { data, error } = await admin.from(table).select("*");
+        if (error) throw new Error(`${table}: ${error.message}`);
+        return [table, data ?? []] as const;
+      }));
+      return response({
+        formatVersion: 2,
+        generatedAt: new Date().toISOString(),
+        project: "auditflow-platform",
+        projectId: "akexwgzlreorfmhgvrnz",
+        tables: Object.fromEntries(results),
+        note: "Backup lógico completo dos dados da aplicação. A estrutura é versionada pelas migrações do repositório.",
+      });
     }
 
     if (payload.action === "create") {
