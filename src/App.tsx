@@ -2956,24 +2956,7 @@ function UsersAdmin() {
     setBackupLoading(true);
     setMessage("");
     try {
-      const tables = [
-        "audit_allowed_users", "audit_profiles", "audit_units", "audit_documents",
-        "audit_checklists", "audit_document_imports", "audit_records", "audits",
-        "audit_answers", "audit_photos", "audit_annual_plan_items",
-      ] as const;
-      const results = await Promise.all(tables.map(async (table) => {
-        const { data, error } = await supabase.from(table).select("*");
-        if (error) throw new Error(`${table}: ${error.message}`);
-        return [table, data ?? []] as const;
-      }));
-      const backup = {
-        formatVersion: 1,
-        generatedAt: new Date().toISOString(),
-        project: "auditflow-platform",
-        projectId: "akexwgzlreorfmhgvrnz",
-        tables: Object.fromEntries(results),
-        note: "Backup lógico dos dados da aplicação. A estrutura do banco é versionada pelas migrações do projeto.",
-      };
+      const backup = await invoke({ action: "backup" });
       saveAs(
         new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" }),
         `backup-dados-auditorias-${backupFileStamp()}.json`,
@@ -3081,7 +3064,7 @@ function UsersAdmin() {
             <ArchiveRestore size={16} /> Exportar imagens e evidências (ZIP)
           </button>
         </div>
-        <p className="mt-3 text-xs text-slate-500">A exportação é exclusiva do administrador. O arquivo JSON contém auditorias, usuários autorizados, perfis, locais, checklists, documentos e registros relacionados.</p>
+        <p className="mt-3 text-xs text-slate-500">A exportação é exclusiva do administrador. O arquivo JSON contém auditorias, usuários autorizados, perfis, locais, checklists, documentos, planejamento, notificações e solicitações internas relacionadas.</p>
       </div>
       {message && <p className="mb-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
       <div className="card overflow-hidden p-0">
