@@ -59,6 +59,7 @@ export interface Answer {
   process: string;
   requirement: string;
   question: string;
+  auditTip?: string;
   documentType: string;
   documentCode: string;
   documentTitle: string;
