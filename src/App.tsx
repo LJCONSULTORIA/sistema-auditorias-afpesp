@@ -2149,20 +2149,6 @@ function AuditForm() {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="break-words font-medium leading-relaxed">{ans.question || "Nova questão — preencha o texto"}</div>
-                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                        <label className="mb-1 block text-sm font-semibold text-amber-900" htmlFor={`audit-tip-${ans.id}`}>
-                          Dicas para a auditoria
-                        </label>
-                        <textarea
-                          id={`audit-tip-${ans.id}`}
-                          className="field min-h-20 border-amber-200 bg-white/80 text-sm"
-                          readOnly={readOnly}
-                          value={ans.auditTip ?? ""}
-                          placeholder="Ex.: verificar indicador e cruzar as informações da pesquisa com o processo de Ouvidoria."
-                          onChange={(event) => update(i, { auditTip: event.target.value })}
-                        />
-                        <p className="mt-1 text-xs text-amber-800">Campo opcional para lembretes e orientações desta questão.</p>
-                      </div>
                       <div className="mt-2 text-sm font-semibold text-afpesp-700">
                         Requisito: {ans.requirement || "Não informado"}
                       </div>
@@ -2234,6 +2220,18 @@ function AuditForm() {
                       if (!exists) update(i, { documents: [...current, document] });
                     }}
                   />}
+                  <div className="mt-3">
+                    <label className="mb-1 block text-xs font-medium text-slate-500" htmlFor={`audit-tip-${ans.id}`}>
+                      Dicas para a auditoria
+                    </label>
+                    <textarea
+                      id={`audit-tip-${ans.id}`}
+                      className="field min-h-16 border-slate-200 bg-white text-sm text-slate-600"
+                      readOnly={readOnly}
+                      value={ans.auditTip ?? ""}
+                      onChange={(event) => update(i, { auditTip: event.target.value })}
+                    />
+                  </div>
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
