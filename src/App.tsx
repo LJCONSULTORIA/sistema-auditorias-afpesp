@@ -2148,9 +2148,18 @@ function AuditForm() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
-                      <div className="break-words font-medium leading-relaxed">{ans.question || "Nova questão — preencha o texto"}</div>
-                      <div className="mt-2 text-sm font-semibold text-afpesp-700">
-                        Requisito: {ans.requirement || "Não informado"}
+                      <div className="space-y-1.5">
+                        <div className="break-words text-sm leading-relaxed text-slate-700">
+                          <span className="font-semibold text-afpesp-700">Processo:</span>{" "}
+                          {ans.process || "Não informado"}
+                        </div>
+                        <div className="break-words font-medium leading-relaxed">
+                          <span className="font-semibold text-afpesp-700">Questão:</span>{" "}
+                          {ans.question || "Nova questão — preencha o texto"}
+                        </div>
+                        <div className="break-words text-sm font-semibold text-afpesp-700">
+                          Requisito: {ans.requirement || "Não informado"}
+                        </div>
                       </div>
                     </div>
                     {audit.status !== "Programada" && canManageAudit && (
