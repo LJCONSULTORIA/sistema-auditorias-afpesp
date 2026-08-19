@@ -1585,6 +1585,8 @@ function AuditForm() {
   );
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState("");
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
@@ -1707,6 +1709,7 @@ function AuditForm() {
     nav("/auditorias");
   };
   const save = async () => {
+    if (isSaving) return;
     setSuccess("");
     if (id && !canManageAudit)
       return setError("Somente os auditores responsáveis ou o administrador podem alterar esta auditoria.");
@@ -1724,6 +1727,7 @@ function AuditForm() {
     if (audit.status === "Em andamento" && audit.answers.some((answer) => !answer.question.trim()))
       return setError("Preencha o texto de todas as questões antes de salvar.");
     setError("");
+    setIsSaving(true);
     try {
       const needsReapproval = Boolean(id && audit.status === "Finalizada" && isAssignedAuditor && !isAdmin);
       const data: Audit = {
@@ -1736,10 +1740,13 @@ function AuditForm() {
       const saved = await saveRemoteAudit({ ...data, id: id || data.id });
       setAudit(data);
       notifyRemoteDataChanged();
+      setLastSavedAt(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
       setSuccess(needsReapproval ? "Alterações salvas. A auditoria voltou a aguardar aprovação do administrador." : id ? "Alterações salvas com sucesso." : "Auditoria salva com sucesso.");
       nav(`/auditorias/${saved}`);
     } catch (saveError) {
       setError(readableError(saveError, "Não foi possível salvar a auditoria."));
+    } finally {
+      setIsSaving(false);
     }
   };
   const startAudit = async () => {
@@ -1941,9 +1948,9 @@ function AuditForm() {
               <button className="btn bg-green-700 text-white hover:bg-green-800" onClick={approveAudit}>Aprovar e finalizar</button>
             </>}
             {canManageAudit && (
-            <button className="btn-primary" onClick={save}>
+            <button className="btn-primary" disabled={isSaving} onClick={save}>
               <Save size={16} />
-              Salvar
+              {isSaving ? "Salvando..." : "Salvar"}
             </button>
             )}
           </div>
@@ -2355,6 +2362,25 @@ function AuditForm() {
           </>
           )}
         </div>
+      )}
+      {id && canManageAudit && audit.status !== "Programada" && (
+        <>
+          <div className="h-24" aria-hidden="true" />
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur sm:px-6">
+            <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+              <div className="min-w-0" aria-live="polite">
+                <p className="text-sm font-semibold text-slate-700">
+                  {isSaving ? "Salvando alterações..." : lastSavedAt ? `Último salvamento confirmado às ${lastSavedAt}` : "Salve regularmente durante a auditoria"}
+                </p>
+                <p className="hidden text-xs text-slate-500 sm:block">O salvamento somente é confirmado após o registro no banco de dados.</p>
+              </div>
+              <button type="button" className="btn-primary shrink-0" disabled={isSaving} onClick={save}>
+                <Save size={16} />
+                {isSaving ? "Salvando..." : "Salvar alterações"}
+              </button>
+            </div>
+          </div>
+        </>
       )}
       {returnDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-labelledby="return-dialog-title">
