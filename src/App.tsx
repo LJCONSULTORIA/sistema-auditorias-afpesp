@@ -1551,7 +1551,7 @@ const answerDocuments = (answer: Answer): DocumentReference[] =>
           version: answer.documentVersion || "",
         }]
       : [];
-function AuditForm() {
+function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   const { id } = useParams();
   const [params] = useSearchParams();
   const nav = useNavigate();
@@ -2365,9 +2365,9 @@ function AuditForm() {
       )}
       {id && canManageAudit && audit.status !== "Programada" && (
         <>
-          <div className="h-24" aria-hidden="true" />
-          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur sm:px-6">
-            <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+          <div className={layoutMode === "mobile" ? "h-40" : "h-40 md:h-24"} aria-hidden="true" />
+          <div className={`fixed inset-x-0 z-50 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur sm:px-6 ${layoutMode === "mobile" ? "bottom-[calc(4.5rem+env(safe-area-inset-bottom))]" : "bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-0"}`}>
+            <div className={`mx-auto flex items-center justify-between gap-3 ${layoutMode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
               <div className="min-w-0" aria-live="polite">
                 <p className="text-sm font-semibold text-slate-700">
                   {isSaving ? "Salvando alterações..." : lastSavedAt ? `Último salvamento confirmado às ${lastSavedAt}` : "Salve regularmente durante a auditoria"}
@@ -3205,8 +3205,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/auditorias" element={<AuditHub isAdmin={profile.role === "admin"} currentUserName={profile.full_name} />} />
-        <Route path="/auditorias/nova" element={<AuditForm />} />
-        <Route path="/auditorias/:id" element={<AuditForm />} />
+        <Route path="/auditorias/nova" element={<AuditForm layoutMode={layoutMode} />} />
+        <Route path="/auditorias/:id" element={<AuditForm layoutMode={layoutMode} />} />
         <Route path="/planejamento" element={<AnnualPlanning isAdmin={profile.role === "admin"} />} />
         <Route path="/cadastros" element={<Cadastros />} />
         {profile.role === "admin" && <Route path="/usuarios" element={<UsersAdmin />} />}
