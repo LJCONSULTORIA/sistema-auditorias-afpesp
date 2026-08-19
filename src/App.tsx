@@ -1956,6 +1956,25 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
           </div>
         }
       />
+      {canManageAudit && layoutMode === "mobile" && (
+        <div className="sticky top-14 z-20 -mx-3 mb-4 flex min-h-12 items-center justify-end gap-2 border-y border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur sm:top-16 sm:-mx-4 sm:px-4">
+          {lastSavedAt && !isSaving && (
+            <span className="truncate text-xs font-medium text-slate-500" aria-live="polite">
+              Salvo às {lastSavedAt}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn-primary shrink-0 px-3 py-2 text-sm"
+            disabled={isSaving}
+            onClick={save}
+            aria-label="Salvar alterações da auditoria"
+          >
+            <Save size={15} />
+            {isSaving ? "Salvando..." : "Salvar"}
+          </button>
+        </div>
+      )}
       {(!id || audit.status === "Programada") && (
         <div className="card">
           <div className="grid gap-4">
@@ -2362,26 +2381,6 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
           </>
           )}
         </div>
-      )}
-      {canManageAudit && layoutMode === "mobile" && (
-        <button
-          type="button"
-          className="btn-primary"
-          style={{
-            position: "fixed",
-            right: "1rem",
-            bottom: "calc(5.25rem + env(safe-area-inset-bottom, 0px))",
-            zIndex: 65,
-            minHeight: "3rem",
-            boxShadow: "0 10px 28px rgba(15, 23, 42, 0.3)",
-          }}
-          disabled={isSaving}
-          onClick={save}
-          aria-label="Salvar alterações da auditoria"
-        >
-          <Save size={18} />
-          {isSaving ? "Salvando..." : "Salvar alterações"}
-        </button>
       )}
       {id && canManageAudit && audit.status !== "Programada" && layoutMode === "web" && (
         <>
