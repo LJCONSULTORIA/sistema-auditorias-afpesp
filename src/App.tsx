@@ -1947,7 +1947,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
               <button className="btn-secondary" onClick={openReturnDialog}>Devolver para ajustes</button>
               <button className="btn bg-green-700 text-white hover:bg-green-800" onClick={approveAudit}>Aprovar e finalizar</button>
             </>}
-            {canManageAudit && (
+            {canManageAudit && layoutMode === "web" && (
             <button className="btn-primary" disabled={isSaving} onClick={save}>
               <Save size={16} />
               {isSaving ? "Salvando..." : "Salvar"}
@@ -1956,25 +1956,6 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
           </div>
         }
       />
-      {canManageAudit && layoutMode === "mobile" && (
-        <div className="sticky top-14 z-20 -mx-3 mb-4 flex min-h-12 items-center justify-end gap-2 border-y border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur sm:top-16 sm:-mx-4 sm:px-4">
-          {lastSavedAt && !isSaving && (
-            <span className="truncate text-xs font-medium text-slate-500" aria-live="polite">
-              Salvo às {lastSavedAt}
-            </span>
-          )}
-          <button
-            type="button"
-            className="btn-primary shrink-0 px-3 py-2 text-sm"
-            disabled={isSaving}
-            onClick={save}
-            aria-label="Salvar alterações da auditoria"
-          >
-            <Save size={15} />
-            {isSaving ? "Salvando..." : "Salvar"}
-          </button>
-        </div>
-      )}
       {(!id || audit.status === "Programada") && (
         <div className="card">
           <div className="grid gap-4">
@@ -2355,6 +2336,25 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
                       </button>}
                     </div>
                   ))}
+                </div>
+              )}
+              {layoutMode === "mobile" && canManageAudit && (
+                <div className="mt-4 flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
+                  {lastSavedAt && !isSaving && (
+                    <span className="text-xs font-medium text-slate-500" aria-live="polite">
+                      Salvo às {lastSavedAt}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-primary px-4"
+                    disabled={isSaving}
+                    onClick={save}
+                    aria-label={`Salvar auditoria após a questão ${i + 1}`}
+                  >
+                    <Save size={16} />
+                    {isSaving ? "Salvando..." : "Salvar"}
+                  </button>
                 </div>
               )}
             </div>
