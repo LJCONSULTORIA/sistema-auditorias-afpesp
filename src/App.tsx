@@ -2363,11 +2363,31 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
           )}
         </div>
       )}
-      {id && canManageAudit && audit.status !== "Programada" && (
+      {canManageAudit && layoutMode === "mobile" && (
+        <button
+          type="button"
+          className="btn-primary"
+          style={{
+            position: "fixed",
+            right: "1rem",
+            bottom: "calc(5.25rem + env(safe-area-inset-bottom, 0px))",
+            zIndex: 65,
+            minHeight: "3rem",
+            boxShadow: "0 10px 28px rgba(15, 23, 42, 0.3)",
+          }}
+          disabled={isSaving}
+          onClick={save}
+          aria-label="Salvar alterações da auditoria"
+        >
+          <Save size={18} />
+          {isSaving ? "Salvando..." : "Salvar alterações"}
+        </button>
+      )}
+      {id && canManageAudit && audit.status !== "Programada" && layoutMode === "web" && (
         <>
-          <div className={layoutMode === "mobile" ? "h-40" : "h-40 md:h-24"} aria-hidden="true" />
-          <div className={`fixed inset-x-0 z-50 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur sm:px-6 ${layoutMode === "mobile" ? "bottom-[calc(4.5rem+env(safe-area-inset-bottom))]" : "bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-0"}`}>
-            <div className={`mx-auto flex items-center justify-between gap-3 ${layoutMode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
+          <div className="h-40 md:h-24" aria-hidden="true" />
+          <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur sm:px-6 md:bottom-0">
+            <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
               <div className="min-w-0" aria-live="polite">
                 <p className="text-sm font-semibold text-slate-700">
                   {isSaving ? "Salvando alterações..." : lastSavedAt ? `Último salvamento confirmado às ${lastSavedAt}` : "Salve regularmente durante a auditoria"}
