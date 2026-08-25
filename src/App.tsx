@@ -1757,7 +1757,8 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
         updatedAt: new Date().toISOString(),
       };
       const saved = await saveRemoteAudit({ ...data, id: id || data.id });
-      setAudit(data);
+      const persisted = await getRemoteAudit(saved);
+      setAudit(persisted);
       notifyRemoteDataChanged();
       setLastSavedAt(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
       setSuccess(needsReapproval ? "Alterações salvas. A auditoria voltou a aguardar aprovação do administrador." : id ? "Alterações salvas com sucesso." : "Auditoria salva com sucesso.");
@@ -2350,6 +2351,9 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
                           update(i, {
                             photos: ans.photos.filter((_, k) => k !== j),
                             photoPaths: ans.photoPaths?.filter((_, k) => k !== j),
+                            removedPhotoPaths: ans.photoPaths?.[j]
+                              ? [...(ans.removedPhotoPaths ?? []), ans.photoPaths[j]]
+                              : ans.removedPhotoPaths,
                           })
                         }
                       >
