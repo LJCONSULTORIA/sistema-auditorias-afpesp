@@ -71,6 +71,7 @@ export interface Answer {
   evidences?: string[];
   photos: string[];
   photoPaths?: string[];
+  removedPhotoPaths?: string[];
   aiReviews?: Array<{
     requestedAt: string;
     acceptedAt?: string;

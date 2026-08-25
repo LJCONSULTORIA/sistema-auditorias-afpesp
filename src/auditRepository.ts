@@ -52,24 +52,41 @@ export async function saveRemoteAudit(audit: Audit) {
   const uid = await userId();
   const id = typeof audit.id === "string" ? audit.id : crypto.randomUUID();
   const previousPaths = new Set<string>();
+  const previousPathsByAnswer = new Map<string, string[]>();
   if (typeof audit.id === "string") {
-    const { data, error } = await supabase.from("audit_records").select("data").eq("id", id).single();
+    const { data, error } = await supabase.from("audit_records").select("data,updated_at").eq("id", id).single();
     if (error) throw error;
-    const previousAnswers = (data?.data as { answers?: Array<{ photos?: string[] }> } | null)?.answers ?? [];
-    previousAnswers.forEach((answer) =>
-      (answer.photos ?? [])
+    const previousAnswers = (data?.data as { answers?: Array<{ id?: string; photos?: string[] }> } | null)?.answers ?? [];
+    previousAnswers.forEach((answer) => {
+      const answerPaths = (answer.photos ?? [])
         .filter((photo) => photo.startsWith("storage:"))
-        .forEach((photo) => previousPaths.add(photo.replace(/^storage:/, ""))),
-    );
+        .map((photo) => photo.replace(/^storage:/, ""));
+      answerPaths.forEach((path) => previousPaths.add(path));
+      if (answer.id) previousPathsByAnswer.set(answer.id, answerPaths);
+    });
+    if (audit.updatedAt && new Date(data.updated_at).getTime() !== new Date(audit.updatedAt).getTime()) {
+      throw new Error("Esta auditoria foi atualizada em outra tela ou dispositivo. Reabra a auditoria antes de salvar para não sobrescrever informações mais recentes.");
+    }
   }
   const answers: Answer[] = [];
   const newlyUploadedPaths: string[] = [];
+  const explicitlyRemovedPaths = new Set<string>();
   for (const answer of audit.answers) {
-    const paths: string[] = [];
+    const removedPaths = new Set(answer.removedPhotoPaths ?? []);
+    removedPaths.forEach((path) => explicitlyRemovedPaths.add(path));
+    const paths: string[] = (previousPathsByAnswer.get(answer.id) ?? []).filter((path) => !removedPaths.has(path));
     for (let index = 0; index < answer.photos.length; index += 1) {
       const photo = answer.photos[index];
       const existingPath = answer.photoPaths?.[index];
-      if (!photo.startsWith("data:") && existingPath) { paths.push(existingPath); continue; }
+      if (!photo.startsWith("data:") && existingPath) {
+        if (!removedPaths.has(existingPath) && !paths.includes(existingPath)) paths.push(existingPath);
+        continue;
+      }
+      if (photo.startsWith("storage:")) {
+        const storedPath = photo.replace(/^storage:/, "");
+        if (!removedPaths.has(storedPath) && !paths.includes(storedPath)) paths.push(storedPath);
+        continue;
+      }
       const blob = await dataUrlBlob(photo);
       const extension = blob.type.includes("png") ? "png" : blob.type.includes("webp") ? "webp" : "jpg";
       const path = `${id}/${answer.id}/${crypto.randomUUID()}.${extension}`;
@@ -79,21 +96,20 @@ export async function saveRemoteAudit(audit: Audit) {
       newlyUploadedPaths.push(path);
     }
     const evidences = answer.evidences?.length ? answer.evidences : [answer.recommendation ?? ""];
-    answers.push({ ...answer, evidences, recommendation: evidences[0] ?? "", photos: paths.map((path) => `storage:${path}`), photoPaths: undefined });
+    const { removedPhotoPaths: _removedPhotoPaths, ...answerWithoutRemovalControl } = answer;
+    answers.push({ ...answerWithoutRemovalControl, evidences, recommendation: evidences[0] ?? "", photos: paths.map((path) => `storage:${path}`), photoPaths: undefined });
   }
   const now = new Date().toISOString();
   const stored = { ...audit, id: undefined, answers, updatedAt: now };
-  const { error } = typeof audit.id === "string"
-    ? await supabase.from("audit_records").update({ status: audit.status, data: stored, updated_at: now }).eq("id", id)
-    : await supabase.from("audit_records").insert({ id, status: audit.status, data: stored, created_by: uid, updated_at: now });
-  if (error) {
+  const persistence = typeof audit.id === "string"
+    ? await supabase.from("audit_records").update({ status: audit.status, data: stored, updated_at: now }).eq("id", id).eq("updated_at", audit.updatedAt).select("id").maybeSingle()
+    : await supabase.from("audit_records").insert({ id, status: audit.status, data: stored, created_by: uid, updated_at: now }).select("id").single();
+  if (persistence.error || !persistence.data) {
     if (newlyUploadedPaths.length) await supabase.storage.from(bucket).remove(newlyUploadedPaths);
-    throw error;
+    if (persistence.error) throw persistence.error;
+    throw new Error("Esta auditoria foi atualizada em outra tela ou dispositivo. Reabra a auditoria antes de salvar para não sobrescrever informações mais recentes.");
   }
-  const retainedPaths = new Set(
-    answers.flatMap((answer) => answer.photos.map((photo) => photo.replace(/^storage:/, ""))),
-  );
-  const removedPaths = [...previousPaths].filter((path) => !retainedPaths.has(path));
+  const removedPaths = [...explicitlyRemovedPaths].filter((path) => previousPaths.has(path));
   if (removedPaths.length) {
     const { error: storageError } = await supabase.storage.from(bucket).remove(removedPaths);
     if (storageError) console.error("Não foi possível remover evidências sem referência:", storageError.message);
