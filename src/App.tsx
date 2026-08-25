@@ -220,6 +220,25 @@ const formatDate = (value: string) =>
   value ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR") : "—";
 const evidenceTexts = (answer: Answer) =>
   answer.evidences?.length ? answer.evidences : [answer.recommendation ?? ""];
+const processCardThemes = [
+  { card: "border-blue-200 border-l-blue-500", label: "bg-blue-50 text-blue-800" },
+  { card: "border-emerald-200 border-l-emerald-500", label: "bg-emerald-50 text-emerald-800" },
+  { card: "border-amber-200 border-l-amber-500", label: "bg-amber-50 text-amber-800" },
+  { card: "border-violet-200 border-l-violet-500", label: "bg-violet-50 text-violet-800" },
+  { card: "border-rose-200 border-l-rose-500", label: "bg-rose-50 text-rose-800" },
+  { card: "border-cyan-200 border-l-cyan-500", label: "bg-cyan-50 text-cyan-800" },
+] as const;
+const processCardTheme = (process: string) => {
+  const processCode = process.match(/\b\d+\.(\d+)\b/);
+  if (processCode) {
+    const processNumber = Number(processCode[1]);
+    if (Number.isFinite(processNumber) && processNumber > 0) {
+      return processCardThemes[(processNumber - 1) % processCardThemes.length];
+    }
+  }
+  const hash = [...process].reduce((total, character) => total + character.charCodeAt(0), 0);
+  return processCardThemes[hash % processCardThemes.length];
+};
 function Layout({
   children,
   user,
@@ -336,7 +355,7 @@ function Layout({
         </div>
       )}
       <div className={`mx-auto flex ${mode === "mobile" ? "max-w-2xl" : "max-w-7xl"}`}>
-        <aside className={`${mode === "mobile" ? "hidden" : "hidden md:block"} min-h-[calc(100vh-4rem)] w-64 shrink-0 border-r bg-white p-4`}>
+        <aside className={`${mode === "mobile" ? "hidden" : "hidden md:block"} sticky top-16 h-[calc(100vh-4rem)] w-64 shrink-0 self-start overflow-y-auto border-r bg-white p-4`}>
           {links.map(([Icon, to, label]) => (
             <NavLink
               key={to}
@@ -2145,9 +2164,11 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
           )}
           {audit.status !== "Programada" && (
           <>
-          {audit.answers.map((ans, i) => (
+          {audit.answers.map((ans, i) => {
+            const processTheme = processCardTheme(ans.process);
+            return (
             <Fragment key={ans.id}>
-            <div className="card overflow-hidden">
+            <div className={`card overflow-hidden border-l-4 ${processTheme.card}`}>
               <div className="mb-5 flex gap-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-afpesp-600 text-sm font-bold text-white">
                   {i + 1}
@@ -2156,7 +2177,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="space-y-1.5">
-                        <div className="break-words text-sm leading-relaxed text-slate-700">
+                        <div className={`inline-block max-w-full break-words rounded-md px-2 py-1 text-sm font-medium leading-relaxed ${processTheme.label}`}>
                           <span className="font-semibold text-afpesp-700">Processo:</span>{" "}
                           {ans.process || "Não informado"}
                         </div>
@@ -2372,7 +2393,8 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
               </div>
             )}
             </Fragment>
-          ))}
+            );
+          })}
           {canManageAudit && audit.answers.length === 0 && (
             <button type="button" className="btn-primary w-full sm:w-auto" onClick={() => addQuestion(-1)}>
               <Plus size={16} /> Incluir primeira questão
