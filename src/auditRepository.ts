@@ -48,6 +48,17 @@ export async function getRemoteAudit(id: string) {
   return hydrateAudit(data as { id: string; data: Record<string, unknown> });
 }
 const dataUrlBlob = async (url: string) => (await fetch(url)).blob();
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+};
 export async function saveRemoteAudit(audit: Audit) {
   const uid = await userId();
   const id = typeof audit.id === "string" ? audit.id : crypto.randomUUID();
@@ -102,12 +113,16 @@ export async function saveRemoteAudit(audit: Audit) {
   const now = new Date().toISOString();
   const stored = { ...audit, id: undefined, answers, updatedAt: now };
   const persistence = typeof audit.id === "string"
-    ? await supabase.from("audit_records").update({ status: audit.status, data: stored, updated_at: now }).eq("id", id).eq("updated_at", audit.updatedAt).select("id").maybeSingle()
+    ? await supabase.from("audit_records").update({ status: audit.status, data: stored, updated_at: now }).eq("id", id).eq("updated_at", audit.updatedAt).select("id,data,updated_at").maybeSingle()
     : await supabase.from("audit_records").insert({ id, status: audit.status, data: stored, created_by: uid, updated_at: now }).select("id").single();
   if (persistence.error || !persistence.data) {
     if (newlyUploadedPaths.length) await supabase.storage.from(bucket).remove(newlyUploadedPaths);
     if (persistence.error) throw persistence.error;
     throw new Error("Esta auditoria foi atualizada em outra tela ou dispositivo. Reabra a auditoria antes de salvar para não sobrescrever informações mais recentes.");
+  }
+  const persistedData = (persistence.data as { data?: Record<string, unknown> }).data;
+  if (!persistedData || stableJson(persistedData) !== stableJson(stored)) {
+    throw new Error("O banco respondeu, mas o conteúdo gravado não corresponde ao conteúdo enviado. O salvamento não foi confirmado.");
   }
   const removedPaths = [...explicitlyRemovedPaths].filter((path) => previousPaths.has(path));
   if (removedPaths.length) {
