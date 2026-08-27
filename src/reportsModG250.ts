@@ -36,8 +36,13 @@ const docsOf = (answer: Answer): DocumentReference[] => answer.documents?.length
 const splitRequirements = (value: string) => value.split(/[;,|/\n]+/).map((item) => item.trim()).filter(Boolean);
 const imageBytes = async (url: string) => {
   if (url.startsWith("data:")) return Uint8Array.from(atob(url.split(",")[1]), (char) => char.charCodeAt(0));
-  return new Uint8Array(await (await fetch(url)).arrayBuffer());
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Não foi possível carregar a imagem (HTTP ${response.status}).`);
+  return new Uint8Array(await response.arrayBuffer());
 };
+
+const imageType = (url: string): "png" | "jpg" =>
+  /^data:image\/png/i.test(url) || /\.png(?:\?|$)/i.test(url) ? "png" : "jpg";
 
 const headerTable = (logo: Uint8Array, unit?: string) => new Table({
   width: { size: 9498, type: WidthType.DXA }, columnWidths: [1560, 7938], borders,
@@ -183,7 +188,31 @@ export async function buildModG250Report(a: Audit) {
     );
     for (let photoIndex = 0; photoIndex < answer.photos.length; photoIndex += 1) {
       const photo = answer.photos[photoIndex];
-      children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 80, after: 40 }, children: [new ImageRun({ data: await imageBytes(photo), transformation: { width: 470, height: 310 }, type: photo.includes("png") ? "png" : "jpg", altText: { title: `Evidência fotográfica ${photoIndex + 1}`, description: `Fotografia da questão 10.${index + 1}`, name: `questao-${index + 1}-foto-${photoIndex + 1}` } })] }), paragraph([run(`Evidência fotográfica ${photoIndex + 1} — item 10.${index + 1}`, { italics: true, size: 18 })], { alignment: AlignmentType.CENTER, after: 120 }));
+      try {
+        const data = await imageBytes(photo);
+        children.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 80, after: 40 },
+            children: [new ImageRun({
+              data,
+              transformation: { width: 470, height: 310 },
+              type: imageType(photo),
+              altText: {
+                title: `Evidência fotográfica ${photoIndex + 1}`,
+                description: `Fotografia da questão 10.${index + 1}`,
+                name: `questao-${index + 1}-foto-${photoIndex + 1}`,
+              },
+            })],
+          }),
+          paragraph([run(`Evidência fotográfica ${photoIndex + 1} — item 10.${index + 1}`, { italics: true, size: 18 })], { alignment: AlignmentType.CENTER, after: 120 }),
+        );
+      } catch (photoError) {
+        console.error(`Falha ao incluir a fotografia ${photoIndex + 1} do item 10.${index + 1} no relatório.`, photoError);
+        children.push(paragraph([
+          run(`Evidência fotográfica ${photoIndex + 1} — item 10.${index + 1}: imagem indisponível no momento da geração.`, { italics: true, size: 18, color: "C00000" }),
+        ], { alignment: AlignmentType.CENTER, after: 120 }));
+      }
     }
   }
 

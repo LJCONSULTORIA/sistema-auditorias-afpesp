@@ -1642,6 +1642,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState("");
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
@@ -2065,6 +2066,23 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
       setIsSaving(false);
     }
   };
+  const generateReport = async () => {
+    if (!id || isGeneratingReport) return;
+    setError("");
+    setSuccess("");
+    setIsGeneratingReport(true);
+    try {
+      // Recarrega a auditoria para renovar os endereços temporários das fotos
+      // antes de montar o documento.
+      const currentAudit = await getRemoteAudit(id);
+      await exportDocx(currentAudit);
+      setSuccess("Relatório gerado com sucesso. Verifique os downloads do navegador.");
+    } catch (reportError) {
+      setError(readableError(reportError, "Não foi possível gerar o relatório. Tente novamente."));
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
   return (
     <>
       <PageTitle
@@ -2083,10 +2101,11 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
             {id && audit.status === "Finalizada" && (
               <button
                 className="btn-secondary"
-                onClick={() => exportDocx(audit)}
+                disabled={isGeneratingReport}
+                onClick={generateReport}
               >
                 <Download size={16} />
-                Gerar relatório
+                {isGeneratingReport ? "Gerando relatório..." : "Gerar relatório"}
               </button>
             )}
             {id && audit.status === "Finalizada" && isAdmin && (
