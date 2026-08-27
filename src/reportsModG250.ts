@@ -41,8 +41,29 @@ const imageBytes = async (url: string) => {
   return new Uint8Array(await response.arrayBuffer());
 };
 
-const imageType = (url: string): "png" | "jpg" =>
-  /^data:image\/png/i.test(url) || /\.png(?:\?|$)/i.test(url) ? "png" : "jpg";
+const reportPhotoBytes = async (url: string) => {
+  const original = await imageBytes(url);
+  const bitmap = await createImageBitmap(new Blob([original]));
+  try {
+    const scale = Math.min(1, 1280 / bitmap.width, 960 / bitmap.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("O navegador não conseguiu preparar a fotografia para o relatório.");
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const compressed = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error("Não foi possível compactar a fotografia.")),
+        "image/jpeg",
+        0.72,
+      ),
+    );
+    return new Uint8Array(await compressed.arrayBuffer());
+  } finally {
+    bitmap.close();
+  }
+};
 
 const headerTable = (logo: Uint8Array, unit?: string) => new Table({
   width: { size: 9498, type: WidthType.DXA }, columnWidths: [1560, 7938], borders,
@@ -189,7 +210,7 @@ export async function buildModG250Report(a: Audit) {
     for (let photoIndex = 0; photoIndex < answer.photos.length; photoIndex += 1) {
       const photo = answer.photos[photoIndex];
       try {
-        const data = await imageBytes(photo);
+        const data = await reportPhotoBytes(photo);
         children.push(
           new Paragraph({
             alignment: AlignmentType.CENTER,
@@ -197,7 +218,7 @@ export async function buildModG250Report(a: Audit) {
             children: [new ImageRun({
               data,
               transformation: { width: 470, height: 310 },
-              type: imageType(photo),
+              type: "jpg",
               altText: {
                 title: `Evidência fotográfica ${photoIndex + 1}`,
                 description: `Fotografia da questão 10.${index + 1}`,
