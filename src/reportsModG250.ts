@@ -36,9 +36,15 @@ const docsOf = (answer: Answer): DocumentReference[] => answer.documents?.length
 const splitRequirements = (value: string) => value.split(/[;,|/\n]+/).map((item) => item.trim()).filter(Boolean);
 const imageBytes = async (url: string) => {
   if (url.startsWith("data:")) return Uint8Array.from(atob(url.split(",")[1]), (char) => char.charCodeAt(0));
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Não foi possível carregar a imagem (HTTP ${response.status}).`);
-  return new Uint8Array(await response.arrayBuffer());
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Não foi possível carregar a imagem (HTTP ${response.status}).`);
+    return new Uint8Array(await response.arrayBuffer());
+  } finally {
+    window.clearTimeout(timeout);
+  }
 };
 
 const reportPhotoBytes = async (url: string) => {
