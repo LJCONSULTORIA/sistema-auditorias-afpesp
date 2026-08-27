@@ -59,7 +59,7 @@ const stableJson = (value: unknown): string => {
   }
   return JSON.stringify(value);
 };
-export async function saveRemoteAudit(audit: Audit) {
+export async function saveRemoteAudit(audit: Audit, expectedUpdatedAt = audit.updatedAt) {
   const uid = await userId();
   const id = typeof audit.id === "string" ? audit.id : crypto.randomUUID();
   const previousPaths = new Set<string>();
@@ -75,7 +75,7 @@ export async function saveRemoteAudit(audit: Audit) {
       answerPaths.forEach((path) => previousPaths.add(path));
       if (answer.id) previousPathsByAnswer.set(answer.id, answerPaths);
     });
-    if (audit.updatedAt && new Date(data.updated_at).getTime() !== new Date(audit.updatedAt).getTime()) {
+    if (expectedUpdatedAt && new Date(data.updated_at).getTime() !== new Date(expectedUpdatedAt).getTime()) {
       throw new Error("Esta auditoria foi atualizada em outra tela ou dispositivo. Reabra a auditoria antes de salvar para não sobrescrever informações mais recentes.");
     }
   }
@@ -113,7 +113,7 @@ export async function saveRemoteAudit(audit: Audit) {
   const now = new Date().toISOString();
   const stored = { ...audit, id: undefined, answers, updatedAt: now };
   const persistence = typeof audit.id === "string"
-    ? await supabase.from("audit_records").update({ status: audit.status, data: stored, updated_at: now }).eq("id", id).eq("updated_at", audit.updatedAt).select("id,data,updated_at").maybeSingle()
+    ? await supabase.from("audit_records").update({ status: audit.status, data: stored, updated_at: now }).eq("id", id).eq("updated_at", expectedUpdatedAt).select("id,data,updated_at").maybeSingle()
     : await supabase.from("audit_records").insert({ id, status: audit.status, data: stored, created_by: uid, updated_at: now }).select("id").single();
   if (persistence.error || !persistence.data) {
     if (newlyUploadedPaths.length) await supabase.storage.from(bucket).remove(newlyUploadedPaths);

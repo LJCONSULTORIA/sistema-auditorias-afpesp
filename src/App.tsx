@@ -1248,7 +1248,7 @@ function AuditHub({ isAdmin, currentUserName }: { isAdmin: boolean; currentUserN
               status: "Em andamento",
               updatedAt: new Date().toISOString(),
             };
-            await saveRemoteAudit(updated);
+            await saveRemoteAudit(updated, fullAudit.updatedAt);
             notifyRemoteDataChanged();
             nav(`/auditorias/${audit.id}`);
           }}
@@ -1846,7 +1846,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
         approvedBy: needsReapproval ? undefined : audit.approvedBy,
         updatedAt: new Date().toISOString(),
       };
-      const saved = await saveRemoteAudit({ ...data, id: id || data.id });
+      const saved = await saveRemoteAudit({ ...data, id: id || data.id }, id ? audit.updatedAt : undefined);
       const persisted = await getRemoteAudit(saved);
       acceptPersistedAudit(persisted);
       notifyRemoteDataChanged();
@@ -1873,7 +1873,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
       updatedAt: new Date().toISOString(),
     };
     try {
-      await saveRemoteAudit({ ...updated, id });
+      await saveRemoteAudit({ ...updated, id }, audit.updatedAt);
       const persisted = await getRemoteAudit(id);
       if (persisted.status !== "Em andamento") throw new Error("O banco de dados não confirmou o início da auditoria.");
       notifyRemoteDataChanged();
@@ -1906,7 +1906,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
       returnReason: undefined,
       updatedAt: new Date().toISOString(),
     };
-    await saveRemoteAudit({ ...updated, id });
+    await saveRemoteAudit({ ...updated, id }, audit.updatedAt);
     notifyRemoteDataChanged();
     setAudit(updated);
   };
@@ -1914,7 +1914,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
     if (!id || !isAdmin || audit.status !== "Finalizada e aguardando aprovação") return;
     if (!confirm("Aprovar e finalizar definitivamente esta auditoria?")) return;
     const updated: Audit = { ...audit, status: "Finalizada", approvedAt: new Date().toISOString(), approvedBy: auditorAtual, updatedAt: new Date().toISOString() };
-    await saveRemoteAudit({ ...updated, id });
+    await saveRemoteAudit({ ...updated, id }, audit.updatedAt);
     notifyRemoteDataChanged();
     setAudit(updated);
     setSuccess("Auditoria aprovada e finalizada.");
@@ -1933,7 +1933,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
     setSuccess("");
     try {
       const updated: Audit = { ...audit, status: "Devolvido para ajustes", approvedAt: undefined, approvedBy: undefined, returnedAt: new Date().toISOString(), returnedBy: auditorAtual, returnReason: returnReason.trim(), updatedAt: new Date().toISOString() };
-      await saveRemoteAudit({ ...updated, id });
+      await saveRemoteAudit({ ...updated, id }, audit.updatedAt);
       const persisted = await getRemoteAudit(id);
       if (persisted.status !== "Devolvido para ajustes" || !persisted.returnedAt) {
         throw new Error("A devolução não foi confirmada pelo banco de dados. Nenhuma mensagem de sucesso foi exibida.");
