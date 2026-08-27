@@ -1273,6 +1273,7 @@ function AuditManagement({
   currentUserName: string;
 }) {
   const [expandedId, setExpandedId] = useState<number | string | null>(null);
+  const [generatingAuditId, setGeneratingAuditId] = useState<number | string | null>(null);
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(audits.length / pageSize));
@@ -1366,9 +1367,21 @@ function AuditManagement({
                 <button
                   type="button"
                   className="btn-secondary w-full sm:w-auto"
-                  onClick={async (event) => { event.stopPropagation(); exportDocx(await getRemoteAudit(String(a.id))); }}
+                  disabled={generatingAuditId === a.id}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+                    if (generatingAuditId !== null) return;
+                    setGeneratingAuditId(a.id!);
+                    try {
+                      await exportDocx(await getRemoteAudit(String(a.id)));
+                    } catch (reportError) {
+                      alert(readableError(reportError, "Não foi possível gerar o relatório."));
+                    } finally {
+                      setGeneratingAuditId(null);
+                    }
+                  }}
                 >
-                  <Download size={16} /> Baixar relatório Word
+                  <Download size={16} /> {generatingAuditId === a.id ? "Gerando relatório..." : "Baixar relatório Word"}
                 </button>
               )}
               {isAdmin && (
