@@ -195,6 +195,17 @@ export async function buildModG250Report(a: Audit) {
     paragraph("São apresentadas a seguir as constatações, evidências e classificações dos itens auditados."),
   ];
 
+  const uniquePhotos = [...new Set(a.answers.flatMap((answer) => answer.photos))];
+  const preparedPhotoEntries = await Promise.all(uniquePhotos.map(async (photo) => {
+    try {
+      return [photo, await reportPhotoBytes(photo)] as const;
+    } catch (photoError) {
+      console.error("Falha ao preparar uma fotografia para o relatório.", photoError);
+      return [photo, null] as const;
+    }
+  }));
+  const preparedPhotos = new Map(preparedPhotoEntries);
+
   for (let index = 0; index < a.answers.length; index += 1) {
     const answer = a.answers[index];
     const requirements = splitRequirements(answer.requirement).join("; ") || "Não informado";
@@ -215,8 +226,8 @@ export async function buildModG250Report(a: Audit) {
     );
     for (let photoIndex = 0; photoIndex < answer.photos.length; photoIndex += 1) {
       const photo = answer.photos[photoIndex];
-      try {
-        const data = await reportPhotoBytes(photo);
+      const data = preparedPhotos.get(photo);
+      if (data) {
         children.push(
           new Paragraph({
             alignment: AlignmentType.CENTER,
@@ -234,8 +245,7 @@ export async function buildModG250Report(a: Audit) {
           }),
           paragraph([run(`Evidência fotográfica ${photoIndex + 1} — item 10.${index + 1}`, { italics: true, size: 18 })], { alignment: AlignmentType.CENTER, after: 120 }),
         );
-      } catch (photoError) {
-        console.error(`Falha ao incluir a fotografia ${photoIndex + 1} do item 10.${index + 1} no relatório.`, photoError);
+      } else {
         children.push(paragraph([
           run(`Evidência fotográfica ${photoIndex + 1} — item 10.${index + 1}: imagem indisponível no momento da geração.`, { italics: true, size: 18, color: "C00000" }),
         ], { alignment: AlignmentType.CENTER, after: 120 }));
