@@ -7,16 +7,19 @@ const userId = async () => {
   if (!data.user) throw new Error("Usuário não identificado.");
   return data.user.id;
 };
-const signedPhoto = async (path: string) => {
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
+const signedPhoto = async (path: string, optimized = false) => {
+  const options = optimized
+    ? { transform: { width: 1000, quality: 55, resize: "contain" as const, format: "origin" as const } }
+    : undefined;
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 3600, options);
   if (error) throw error;
   return data.signedUrl;
 };
-const hydrateAudit = async (row: { id: string; data: Record<string, unknown> }) => {
+const hydrateAudit = async (row: { id: string; data: Record<string, unknown> }, optimizePhotos = false) => {
   const audit = { ...row.data, id: row.id } as unknown as Audit;
   audit.answers = await Promise.all((audit.answers ?? []).map(async (answer) => {
     const paths = (answer.photos ?? []).map((photo) => photo.replace(/^storage:/, ""));
-    const photos = await Promise.all(paths.map(signedPhoto));
+    const photos = await Promise.all(paths.map((path) => signedPhoto(path, optimizePhotos)));
     const evidences = answer.evidences?.length ? answer.evidences : [answer.recommendation ?? ""];
     return { ...answer, auditTip: answer.auditTip ?? "", evidences, recommendation: evidences[0] ?? "", photos, photoPaths: paths };
   }));
@@ -46,6 +49,11 @@ export async function getRemoteAudit(id: string) {
   const { data, error } = await supabase.from("audit_records").select("id,data").eq("id", id).single();
   if (error) throw error;
   return hydrateAudit(data as { id: string; data: Record<string, unknown> });
+}
+export async function getRemoteAuditForReport(id: string) {
+  const { data, error } = await supabase.from("audit_records").select("id,data").eq("id", id).single();
+  if (error) throw error;
+  return hydrateAudit(data as { id: string; data: Record<string, unknown> }, true);
 }
 const dataUrlBlob = async (url: string) => (await fetch(url)).blob();
 const stableJson = (value: unknown): string => {

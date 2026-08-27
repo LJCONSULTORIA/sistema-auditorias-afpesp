@@ -59,7 +59,7 @@ import type {
 import { exportDocx } from "./reports";
 import { supabase } from "./supabase";
 import {
-  createRemoteChecklist, deleteRemoteAudit, deleteRemoteChecklist, getRemoteAudit,
+  createRemoteChecklist, deleteRemoteAudit, deleteRemoteChecklist, getRemoteAudit, getRemoteAuditForReport,
   listRemoteAudits, listRemoteAuditSummaries, listRemoteChecklists, saveRemoteAudit,
 } from "./auditRepository";
 const valueLabelsPlugin: Plugin = {
@@ -1373,7 +1373,7 @@ function AuditManagement({
                     if (generatingAuditId !== null) return;
                     setGeneratingAuditId(a.id!);
                     try {
-                      await exportDocx(await getRemoteAudit(String(a.id)));
+                      await exportDocx(await getRemoteAuditForReport(String(a.id)));
                     } catch (reportError) {
                       alert(readableError(reportError, "Não foi possível gerar o relatório."));
                     } finally {
@@ -2087,7 +2087,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
     try {
       // Recarrega a auditoria para renovar os endereços temporários das fotos
       // antes de montar o documento.
-      const currentAudit = await getRemoteAudit(id);
+      const currentAudit = await getRemoteAuditForReport(id);
       await exportDocx(currentAudit);
       setSuccess("Relatório gerado com sucesso. Verifique os downloads do navegador.");
     } catch (reportError) {
