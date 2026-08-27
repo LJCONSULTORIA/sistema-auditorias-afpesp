@@ -1570,12 +1570,40 @@ const answerDocuments = (answer: Answer): DocumentReference[] =>
           version: answer.documentVersion || "",
         }]
       : [];
+function PersistedEvidencePhoto({ src, path }: { src?: string; path?: string }) {
+  const [currentSrc, setCurrentSrc] = useState(src ?? "");
+  const [failed, setFailed] = useState(false);
+  const retried = useRef(false);
+  useEffect(() => {
+    setCurrentSrc(src ?? "");
+    setFailed(false);
+    retried.current = false;
+  }, [src, path]);
+  const renewSignedUrl = async () => {
+    if (!path || retried.current) {
+      setFailed(true);
+      return;
+    }
+    retried.current = true;
+    const { data, error } = await supabase.storage.from("audit-evidence").createSignedUrl(path, 3600);
+    if (error || !data?.signedUrl) {
+      setFailed(true);
+      return;
+    }
+    setCurrentSrc(data.signedUrl);
+  };
+  useEffect(() => {
+    if (!currentSrc && path) void renewSignedUrl();
+  }, [currentSrc, path]);
+  if (failed) return <div className="flex h-28 w-full items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-3 text-center text-xs font-semibold text-amber-800 sm:w-40">Foto salva, mas não foi possível carregá-la. Reabra a auditoria.</div>;
+  if (!currentSrc) return <div className="h-28 w-full animate-pulse rounded-lg bg-slate-100 sm:w-40" />;
+  return <img src={currentSrc} className="h-28 w-full rounded-lg object-cover sm:w-40" onError={() => void renewSignedUrl()} />;
+}
 const auditDraftSnapshot = (audit: Audit): Audit => ({
   ...audit,
   answers: audit.answers.map((answer) => ({
     ...answer,
     photos: [],
-    photoPaths: undefined,
   })),
 });
 const auditDraftFingerprint = (audit: Audit) => JSON.stringify(auditDraftSnapshot(audit));
@@ -2427,14 +2455,11 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
                   </Field>
                 </div>}
               </div>
-              {ans.photos.length > 0 && (
+              {Math.max(ans.photos.length, ans.photoPaths?.length ?? 0) > 0 && (
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3">
-                  {ans.photos.map((p, j) => (
-                    <div className="relative min-w-0" key={j}>
-                      <img
-                        src={p}
-                        className="h-28 w-full rounded-lg object-cover sm:w-40"
-                      />
+                  {Array.from({ length: Math.max(ans.photos.length, ans.photoPaths?.length ?? 0) }, (_, j) => (
+                    <div className="relative min-w-0" key={ans.photoPaths?.[j] ?? j}>
+                      <PersistedEvidencePhoto src={ans.photos[j]} path={ans.photoPaths?.[j]} />
                       {!readOnly && <button
                         className="absolute right-1 top-1 rounded-full bg-white p-1 shadow"
                         onClick={() =>
