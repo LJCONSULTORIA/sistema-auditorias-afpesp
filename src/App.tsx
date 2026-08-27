@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Routes,
   Route,
@@ -1570,6 +1570,15 @@ const answerDocuments = (answer: Answer): DocumentReference[] =>
           version: answer.documentVersion || "",
         }]
       : [];
+const auditDraftSnapshot = (audit: Audit): Audit => ({
+  ...audit,
+  answers: audit.answers.map((answer) => ({
+    ...answer,
+    photos: [],
+    photoPaths: undefined,
+  })),
+});
+const auditDraftFingerprint = (audit: Audit) => JSON.stringify(auditDraftSnapshot(audit));
 function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   const { id } = useParams();
   const [params] = useSearchParams();
@@ -1609,6 +1618,9 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
+  const [auditLoaded, setAuditLoaded] = useState(false);
+  const persistedFingerprint = useRef("");
+  const persistedUpdatedAt = useRef("");
   const [audit, setAudit] = useState<Audit>({
     locationType,
     unit: selectedUnit,
@@ -1636,9 +1648,87 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   const editableStatus = ["Programada", "Em andamento", "Devolvido para ajustes"].includes(audit.status);
   const canManageAudit = !id || (editableStatus && (isAdmin || isAssignedAuditor));
   const readOnly = !canManageAudit;
+  const draftKey = `afpesp:audit-draft:${id ?? `new:${locationType}:${selectedUnit}`}`;
   useEffect(() => {
-    if (id) getRemoteAudit(id).then(setAudit).catch((error) => setError(error.message));
-  }, [id]);
+    if (!id) {
+      persistedFingerprint.current = auditDraftFingerprint(audit);
+      persistedUpdatedAt.current = audit.updatedAt;
+      setAuditLoaded(true);
+      return;
+    }
+    getRemoteAudit(id).then((remoteAudit) => {
+      persistedFingerprint.current = auditDraftFingerprint(remoteAudit);
+      persistedUpdatedAt.current = remoteAudit.updatedAt;
+      const rawDraft = localStorage.getItem(draftKey);
+      if (!rawDraft) {
+        setAudit(remoteAudit);
+        setAuditLoaded(true);
+        return;
+      }
+      try {
+        const draft = JSON.parse(rawDraft) as { baseUpdatedAt: string; audit: Audit };
+        if (draft.baseUpdatedAt !== remoteAudit.updatedAt) {
+          setAudit(remoteAudit);
+          setError("Existe um rascunho local de uma versão anterior. Ele foi preservado, mas não foi aplicado para não sobrescrever alterações mais recentes.");
+        } else {
+          const remoteAnswers = new Map(remoteAudit.answers.map((answer) => [answer.id, answer]));
+          const recovered: Audit = {
+            ...remoteAudit,
+            ...draft.audit,
+            id: remoteAudit.id,
+            updatedAt: remoteAudit.updatedAt,
+            answers: draft.audit.answers.map((draftAnswer) => {
+              const remoteAnswer = remoteAnswers.get(draftAnswer.id);
+              return remoteAnswer
+                ? { ...remoteAnswer, ...draftAnswer, photos: remoteAnswer.photos, photoPaths: remoteAnswer.photoPaths }
+                : { ...draftAnswer, photos: [], photoPaths: undefined };
+            }),
+          };
+          setAudit(recovered);
+          setSuccess("Rascunho não salvo recuperado deste dispositivo. Clique em Salvar para confirmar no banco.");
+        }
+      } catch {
+        setAudit(remoteAudit);
+        setError("O rascunho local não pôde ser lido e foi mantido para análise.");
+      }
+      setAuditLoaded(true);
+    }).catch((loadError) => setError(loadError.message));
+  }, [id, draftKey]);
+  useEffect(() => {
+    if (!auditLoaded) return;
+    const dirty = auditDraftFingerprint(audit) !== persistedFingerprint.current;
+    if (!dirty) {
+      localStorage.removeItem(draftKey);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          savedAt: new Date().toISOString(),
+          baseUpdatedAt: persistedUpdatedAt.current,
+          audit: auditDraftSnapshot(audit),
+        }));
+      } catch {
+        setError("O navegador não conseguiu armazenar o rascunho local. Salve a auditoria antes de sair.");
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [audit, auditLoaded, draftKey]);
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!auditLoaded || auditDraftFingerprint(audit) === persistedFingerprint.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [audit, auditLoaded]);
+  const acceptPersistedAudit = (persisted: Audit) => {
+    persistedFingerprint.current = auditDraftFingerprint(persisted);
+    persistedUpdatedAt.current = persisted.updatedAt;
+    localStorage.removeItem(draftKey);
+    acceptPersistedAudit(persisted);
+  };
   const fromChecklist = (c: Checklist) =>
     setAudit((a) => ({
       ...a,
@@ -1758,7 +1848,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
       };
       const saved = await saveRemoteAudit({ ...data, id: id || data.id });
       const persisted = await getRemoteAudit(saved);
-      setAudit(persisted);
+      acceptPersistedAudit(persisted);
       notifyRemoteDataChanged();
       setLastSavedAt(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
       setSuccess(needsReapproval ? "Alterações salvas. A auditoria voltou a aguardar aprovação do administrador." : id ? "Alterações salvas com sucesso." : "Auditoria salva com sucesso.");
@@ -1787,7 +1877,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
       const persisted = await getRemoteAudit(id);
       if (persisted.status !== "Em andamento") throw new Error("O banco de dados não confirmou o início da auditoria.");
       notifyRemoteDataChanged();
-      setAudit(persisted);
+      acceptPersistedAudit(persisted);
       setError("");
     } catch (startError) {
       setError(readableError(startError, "Não foi possível iniciar a auditoria."));
@@ -1849,7 +1939,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
         throw new Error("A devolução não foi confirmada pelo banco de dados. Nenhuma mensagem de sucesso foi exibida.");
       }
       notifyRemoteDataChanged();
-      setAudit(persisted);
+      acceptPersistedAudit(persisted);
       setReturnDialogOpen(false);
       setReturnReason("");
       setSuccess("Auditoria devolvida para ajustes. Os auditores responsáveis serão avisados no sistema.");
