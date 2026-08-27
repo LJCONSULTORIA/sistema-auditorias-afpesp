@@ -1649,6 +1649,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   const [auditLoaded, setAuditLoaded] = useState(false);
   const persistedFingerprint = useRef("");
   const persistedUpdatedAt = useRef("");
+  const hasUnsavedChanges = useRef(false);
   const [audit, setAudit] = useState<Audit>({
     locationType,
     unit: selectedUnit,
@@ -1725,6 +1726,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   useEffect(() => {
     if (!auditLoaded) return;
     const dirty = auditDraftFingerprint(audit) !== persistedFingerprint.current;
+    hasUnsavedChanges.current = dirty;
     if (!dirty) {
       localStorage.removeItem(draftKey);
       return;
@@ -1744,18 +1746,19 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
   }, [audit, auditLoaded, draftKey]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!auditLoaded || auditDraftFingerprint(audit) === persistedFingerprint.current) return;
+      if (!auditLoaded || !hasUnsavedChanges.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [audit, auditLoaded]);
+  }, [auditLoaded]);
   const acceptPersistedAudit = (persisted: Audit) => {
     persistedFingerprint.current = auditDraftFingerprint(persisted);
     persistedUpdatedAt.current = persisted.updatedAt;
+    hasUnsavedChanges.current = false;
     localStorage.removeItem(draftKey);
-    acceptPersistedAudit(persisted);
+    setAudit(persisted);
   };
   const fromChecklist = (c: Checklist) =>
     setAudit((a) => ({
@@ -2022,19 +2025,45 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
     setError("");
   };
   const photos = async (i: number, files: FileList | null) => {
-    if (!files) return;
-    const urls = await Promise.all(
-      [...files].map(
-        (f) =>
-          new Promise<string>((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () => resolve(String(r.result));
-            r.onerror = reject;
-            r.readAsDataURL(f);
-          }),
-      ),
-    );
-    update(i, { photos: [...audit.answers[i].photos, ...urls] });
+    if (!files?.length || isSaving) return;
+    setError("");
+    setSuccess("");
+    setIsSaving(true);
+    try {
+      const urls = await Promise.all(
+        [...files].map(
+          (file) =>
+            new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result));
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            }),
+        ),
+      );
+      const nextAudit: Audit = {
+        ...audit,
+        answers: audit.answers.map((answer, answerIndex) =>
+          answerIndex === i ? { ...answer, photos: [...answer.photos, ...urls] } : answer
+        ),
+      };
+      setAudit(nextAudit);
+      if (!id) return;
+      await saveRemoteAudit({ ...nextAudit, id }, audit.updatedAt);
+      const persisted = await getRemoteAudit(id);
+      const persistedAnswer = persisted.answers[i];
+      if (!persistedAnswer || persistedAnswer.photos.length < nextAudit.answers[i].photos.length) {
+        throw new Error("O banco não confirmou todas as fotos selecionadas.");
+      }
+      acceptPersistedAudit(persisted);
+      notifyRemoteDataChanged();
+      setLastSavedAt(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
+      setSuccess(`Foto(s) salva(s) e confirmada(s) no banco: ${urls.length}.`);
+    } catch (photoError) {
+      setError(readableError(photoError, "Não foi possível salvar a fotografia."));
+    } finally {
+      setIsSaving(false);
+    }
   };
   return (
     <>
@@ -2449,6 +2478,7 @@ function AuditForm({ layoutMode }: { layoutMode: LayoutMode }) {
                       accept="image/*"
                       capture="environment"
                       multiple
+                      disabled={isSaving}
                       className="field"
                       onChange={(e) => photos(i, e.target.files)}
                     />
