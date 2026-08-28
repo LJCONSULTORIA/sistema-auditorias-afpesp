@@ -37,7 +37,7 @@ const splitRequirements = (value: string) => value.split(/[;,|/\n]+/).map((item)
 const imageBytes = async (url: string) => {
   if (url.startsWith("data:")) return Uint8Array.from(atob(url.split(",")[1]), (char) => char.charCodeAt(0));
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 15000);
+  const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) throw new Error(`Não foi possível carregar a imagem (HTTP ${response.status}).`);
@@ -196,15 +196,38 @@ export async function buildModG250Report(a: Audit) {
   ];
 
   const uniquePhotos = [...new Set(a.answers.flatMap((answer) => answer.photos))];
-  const preparedPhotoEntries = await Promise.all(uniquePhotos.map(async (photo) => {
-    try {
-      return [photo, await reportPhotoBytes(photo)] as const;
-    } catch (photoError) {
-      console.error("Falha ao preparar uma fotografia para o relatório.", photoError);
-      return [photo, null] as const;
+  const preparedPhotos = new Map<string, Uint8Array>();
+  const failedPhotos: string[] = [];
+  let nextPhotoIndex = 0;
+  const prepareNextPhoto = async () => {
+    while (nextPhotoIndex < uniquePhotos.length) {
+      const photo = uniquePhotos[nextPhotoIndex];
+      nextPhotoIndex += 1;
+      let prepared: Uint8Array | null = null;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3 && !prepared; attempt += 1) {
+        try {
+          prepared = await reportPhotoBytes(photo);
+        } catch (photoError) {
+          lastError = photoError;
+          if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, attempt * 750));
+        }
+      }
+      if (prepared) {
+        preparedPhotos.set(photo, prepared);
+      } else {
+        console.error("Falha definitiva ao preparar uma fotografia para o relatório.", lastError);
+        failedPhotos.push(photo);
+      }
     }
-  }));
-  const preparedPhotos = new Map(preparedPhotoEntries);
+  };
+  const workerCount = Math.min(6, uniquePhotos.length);
+  await Promise.all(Array.from({ length: workerCount }, () => prepareNextPhoto()));
+  if (failedPhotos.length) {
+    throw new Error(
+      `Não foi possível confirmar ${failedPhotos.length} fotografia(s). O relatório não foi baixado para evitar um documento incompleto. Tente gerar novamente.`,
+    );
+  }
 
   for (let index = 0; index < a.answers.length; index += 1) {
     const answer = a.answers[index];
@@ -227,8 +250,10 @@ export async function buildModG250Report(a: Audit) {
     for (let photoIndex = 0; photoIndex < answer.photos.length; photoIndex += 1) {
       const photo = answer.photos[photoIndex];
       const data = preparedPhotos.get(photo);
-      if (data) {
-        children.push(
+      if (!data) {
+        throw new Error("Uma fotografia confirmada não foi localizada durante a montagem. O relatório foi interrompido para evitar um documento incompleto.");
+      }
+      children.push(
           new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing: { before: 80, after: 40 },
@@ -245,11 +270,6 @@ export async function buildModG250Report(a: Audit) {
           }),
           paragraph([run(`Evidência fotográfica ${photoIndex + 1} — item 10.${index + 1}`, { italics: true, size: 18 })], { alignment: AlignmentType.CENTER, after: 120 }),
         );
-      } else {
-        children.push(paragraph([
-          run(`Evidência fotográfica ${photoIndex + 1} — item 10.${index + 1}: imagem indisponível no momento da geração.`, { italics: true, size: 18, color: "C00000" }),
-        ], { alignment: AlignmentType.CENTER, after: 120 }));
-      }
     }
   }
 
