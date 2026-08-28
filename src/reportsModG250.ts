@@ -259,7 +259,7 @@ export async function buildModG250Report(a: Audit) {
             spacing: { before: 80, after: 40 },
             children: [new ImageRun({
               data,
-              transformation: { width: 470, height: 310 },
+              transformation: { width: 302, height: 227 },
               type: "jpg",
               altText: {
                 title: `Evidência fotográfica ${photoIndex + 1}`,
